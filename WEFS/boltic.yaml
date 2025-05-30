@@ -1,0 +1,10 @@
+app: WEFS docker
+region: asia-south1
+entrypoint: "index.js"
+
+build:
+  builtin: dockerfile
+  ignorefile: .gitignore
+
+env:
+  PORT: '8080'
