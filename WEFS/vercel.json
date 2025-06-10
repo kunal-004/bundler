@@ -15,11 +15,11 @@
   ],
   "routes": [
     {
-      "src": "/fp/(.*)",
+      "src": "/api/(.*)",
       "dest": "api/server.js"
     },
     {
-      "src": "/api/(.*)",
+      "src": "/fp/(.*)",
       "dest": "api/server.js"
     },
     {
