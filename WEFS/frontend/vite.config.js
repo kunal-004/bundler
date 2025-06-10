@@ -7,7 +7,10 @@ export default defineConfig({
   resolve: {
     preserveSymlinks: true,
   },
-  build: { outDir: "dist" },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+  },
   server: {
     host: "localhost",
     port: process.env.FRONTEND_PORT,

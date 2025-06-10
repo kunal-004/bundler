@@ -26,7 +26,7 @@ const {
   generateName,
   getCompanyInfo,
   generatePromptSuggestions,
-} = require("../controller");
+} = require("../controller/index");
 
 // Initialize SQLite instance
 const sqliteInstance = new sqlite3.Database(":memory:"); // Use in-memory DB for serverless
