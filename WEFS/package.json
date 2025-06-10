@@ -3,10 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "vercel dev",
-    "build": "npm --prefix frontend run build",
-    "start": "node api/server.js",
-    "test": "jest --config jest.config.js --no-cache --detectOpenHandles --json --outputFile=./coverage/coverage.json"
+    "dev": "vite",
+    "build": "cd frontend && npm install && npm run build",
+    "start": "node api/server.js"
   },
   "nodemonConfig": {
     "ignore": [
