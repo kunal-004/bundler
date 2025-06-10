@@ -32,7 +32,7 @@ const {
   getCompanyInfo,
   generatePromptSuggestions,
   // getAnalytics,
-} = require("./controller");
+} = require("../controller");
 
 const fdkExtension = setupFdk({
   api_key: process.env.EXTENSION_API_KEY,
