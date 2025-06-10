@@ -29,7 +29,13 @@ const {
 } = require("../controller.js");
 
 // Initialize SQLite instance
-const sqliteInstance = new sqlite3.Database(":memory:"); // Use in-memory DB for serverless
+let sqliteInstance;
+if (process.env.NODE_ENV !== "production") {
+  const sqlite3 = require("sqlite3").verbose();
+  sqliteInstance = new sqlite3.Database(":memory:");
+} else {
+  sqliteInstance = null; // or use an alternative
+}
 
 const fdkExtension = setupFdk({
   api_key: process.env.EXTENSION_API_KEY,
