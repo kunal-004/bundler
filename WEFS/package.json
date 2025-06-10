@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "cd frontend && npm install && npm run build && cd .. && cp -r frontend/dist/* ./",
+    "build": "cd frontend && npm install && npm run build",
     "start": "node api/server.js"
   },
   "nodemonConfig": {

@@ -68,7 +68,7 @@ app.use(cookieParser("ext.session"));
 app.use(bodyParser.json({ limit: "2mb" }));
 
 // FDK extension handler for authentication, etc.
-app.use("/", fdkExtension.fdkHandler);
+app.use("/fp", fdkExtension.fdkHandler);
 
 // Create routers
 const bundleRouter = express.Router();
