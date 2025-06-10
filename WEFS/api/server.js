@@ -115,23 +115,6 @@ platformApiRoutes.use("/company", companyRouter);
 
 app.use("/api", platformApiRoutes);
 
-// Add error handling middleware
-app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  res.status(500).json({
-    success: false,
-    message: "Internal server error",
-  });
-});
-
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "OK",
-    timestamp: new Date().toISOString(),
-  });
-});
-
 // DO NOT SERVE STATIC FILES OR HAVE A CATCH-ALL ROUTE HERE
 // Vercel handles this with the routes in vercel.json
 

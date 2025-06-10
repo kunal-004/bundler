@@ -24,7 +24,7 @@
     "start": "nodemon index.js",
     "test": "jest",
     "eject": "react-scripts eject",
-    "vercel-build": "npm run build"
+    "vercel-build": "vite build"
   },
   "type": "module",
   "eslintConfig": {
