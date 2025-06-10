@@ -1,10 +1,11 @@
 const mongoose = require("mongoose");
 const { GoogleGenerativeAI, SchemaType } = require("@google/generative-ai");
-const { PixelbinConfig, PixelbinClient } = require("@pixelbin/admin");
+const sharp = require("sharp");
+const cloudinary = require("cloudinary").v2;
 
 const connectToDb = async () => {
   try {
-    const uri = `mongodb+srv://Asdf123:Asdf123@cluster0.nrgwdpk.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+    const uri = `mongodb+srv://Asdf123:Asdf123@cluster0.83ziukd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
     await mongoose
       .connect(uri)
@@ -162,24 +163,269 @@ async function enrichProductsWithKeywords(products, delayMs = 4000) {
   return enriched;
 }
 
-async function generateImageUsingPixelBin(imageUrls) {
-  // const config = new PixelbinConfig({
-  //   domain: "https://api.pixelbin.io",
-  //   apiSecret: "API_TOKEN",
-  // });
-  // const pixelbin = new PixelbinClient(config);
-  // // list the assets stored on your organization's Pixelbin Storage
-  // const explorer = pixelbin.assets.listFilesPaginator({
-  //   onlyFiles: true,
-  //   pageSize: 5,
-  // });
-  // while (explorer.hasNext()) {
-  //   const { items, page } = await explorer.next();
-  //   console.log(page.current); // 1
-  //   console.log(page.hasNext); // false
-  //   console.log(page.size); // 3
-  //   console.log(items.length); // 3
-  // }
+async function isApplicationId(id) {
+  const str = String(id);
+  const isAlphanumeric = /[a-z]/i.test(str) && /[0-9]/.test(str);
+  if (isAlphanumeric) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+// async function generateImageUsingPixelBin(imageUrls) {
+//   // const config = new PixelbinConfig({
+//   //   domain: "https://api.pixelbin.io",
+//   //   apiSecret: "API_TOKEN",
+//   // });
+//   // const pixelbin = new PixelbinClient(config);
+//   // // list the assets stored on your organization's Pixelbin Storage
+//   // const explorer = pixelbin.assets.listFilesPaginator({
+//   //   onlyFiles: true,
+//   //   pageSize: 5,
+//   // });
+//   // while (explorer.hasNext()) {
+//   //   const { items, page } = await explorer.next();
+//   //   console.log(page.current); // 1
+//   //   console.log(page.hasNext); // false
+//   //   console.log(page.size); // 3
+//   //   console.log(items.length); // 3
+//   // }
+// }
+
+async function mergeBase64ImagesGrid(base64Images, options = {}) {
+  const imageBuffers = base64Images.map((b64) =>
+    Buffer.from(b64.replace(/^data:image\/\w+;base64,/, ""), "base64")
+  );
+
+  const loadedImages = await Promise.all(
+    imageBuffers.map((buf) => sharp(buf).metadata())
+  );
+  const width = Math.max(...loadedImages.map((img) => img.width));
+  const height = Math.max(...loadedImages.map((img) => img.height));
+
+  const cols = options.columns || Math.ceil(Math.sqrt(base64Images.length));
+  const rows = Math.ceil(base64Images.length / cols);
+
+  const canvasWidth = cols * width;
+  const canvasHeight = rows * height;
+
+  const compositeOps = imageBuffers.map((buffer, i) => {
+    const x = (i % cols) * width;
+    const y = Math.floor(i / cols) * height;
+    return { input: buffer, top: y, left: x };
+  });
+
+  const outputBuffer = await sharp({
+    create: {
+      width: canvasWidth,
+      height: canvasHeight,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 }, // white background
+    },
+  })
+    .composite(compositeOps)
+    .png()
+    .toBuffer();
+
+  return options.base64
+    ? outputBuffer.toString("base64")
+    : sharp(outputBuffer).toFile("merged-output.png");
+}
+
+async function generateImageUsingGemini(
+  imageUrls,
+  imageContext,
+  additionalPrompt
+) {
+  try {
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      const response = {
+        success: false,
+        message: "Send imageUrls as an array",
+      };
+      return response;
+    }
+
+    const googleApi = process.env.GEMINI_API;
+    const genAI = new GoogleGenerativeAI(googleApi);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-flash-exp-image-generation",
+      generationConfig: {
+        responseModalities: ["Text", "Image"],
+        temperature: 0.1,
+      },
+    });
+
+    const prompt = `CRITICAL INSTRUCTION: Create a professional product photography composition using ONLY the exact objects shown in the input image.
+
+STRICT REQUIREMENTS:
+1. PRESERVE EXACTLY: Keep every object's original color, shape, size, text, logos, and markings unchanged
+2. MAINTAIN QUANTITIES: Use the exact same number of each item shown (no adding, removing, or duplicating)
+3. NO MODIFICATIONS: Do not alter, resize, recolor, or transform any object in any way
+4. ARRANGEMENT ONLY: Simply arrange the existing objects in an aesthetically pleasing layout
+5. BACKGROUND: Place objects on a clean, neutral background suitable for product photography
+6. LIGHTING: Apply professional studio lighting that enhances but doesn't change the objects
+7. VISIBILITY: Ensure all objects are clearly visible and properly positioned
+
+FORBIDDEN ACTIONS:
+- Do not change colors of any object
+- Do not duplicate or multiply objects
+- Do not merge objects together
+- Do not add new elements not present in the original
+- Do not modify text, logos, or patterns on objects
+- Do not make objects float or appear unnatural
+
+GOAL: Create a clean, professional product photo layout using the exact objects provided, maintaining their original appearance while improving the overall composition and lighting.`;
+
+    const imageContextFinal = imageContext
+      ? `
+OBJECT IDENTIFICATION:
+${imageContext}
+
+Use this information to correctly identify and preserve each object as specified above.
+`
+      : "";
+
+    const additionalPromptFinal = additionalPrompt
+      ? `
+ADDITIONAL REQUIREMENTS:
+${additionalPrompt}
+
+Remember: These additional requirements must not override the core preservation rules above.
+`
+      : "";
+
+    const base64Images = [];
+    const partsForSingleOutput = [
+      {
+        text: prompt + imageContextFinal + additionalPromptFinal,
+      },
+    ];
+
+    for (const url of imageUrls) {
+      try {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${url}: ${response.statusText}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Image = buffer.toString("base64");
+        base64Images.push(base64Image);
+      } catch (fetchError) {
+        console.error(`Error processing image ${url}:`, fetchError);
+        throw new Error(`Failed to process image: ${url}`);
+      }
+    }
+
+    try {
+      const mergedImageBase64 = await mergeBase64ImagesGrid(base64Images, {
+        base64: true,
+      });
+      partsForSingleOutput.push({
+        inlineData: {
+          mimeType: "image/png",
+          data: mergedImageBase64,
+        },
+      });
+    } catch (mergeError) {
+      console.error("Error merging images:", mergeError);
+      throw new Error("Failed to merge input images");
+    }
+
+    let generationResponse;
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+      try {
+        generationResponse = await model.generateContent(partsForSingleOutput);
+        break;
+      } catch (genError) {
+        attempts++;
+        if (attempts >= maxAttempts) {
+          throw new Error(
+            `Failed to generate content after ${maxAttempts} attempts: ${genError.message}`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempts));
+      }
+    }
+
+    const apiResponse = generationResponse.response;
+    const combinedResult = {
+      text: null,
+      image: null,
+      originalFilenames: imageUrls.slice(),
+    };
+
+    if (apiResponse?.candidates?.length > 0) {
+      const candidate = apiResponse.candidates[0];
+      if (candidate.content?.parts) {
+        for (const part of candidate.content.parts) {
+          if (part.text) {
+            combinedResult.text = (combinedResult.text || "") + part.text;
+          } else if (part.inlineData?.data) {
+            combinedResult.image = part.inlineData.data;
+          }
+        }
+      }
+    }
+
+    if (combinedResult.image) {
+      const outputBuffer = Buffer.from(combinedResult.image, "base64");
+
+      return {
+        success: true,
+        message: "Image generated successfully",
+        data: outputBuffer,
+        textResponse: combinedResult.text || null,
+      };
+    } else {
+      return {
+        success: false,
+        message: "Could not generate image - no image data in response",
+        textResponse: combinedResult.text || null,
+      };
+    }
+  } catch (err) {
+    console.error("Image generation error:", err);
+    return {
+      success: false,
+      message: `Image generation failed: ${err.message}`,
+      error: err.name || "Unknown Error",
+    };
+  }
+}
+
+async function uploadBase64Image(base64String) {
+  try {
+    const cloudAPIKey = 624931393489174;
+    const cloudAPISecret = "OaI-KjOa9ZRYr1NeQBlLARPmX_A";
+
+    cloudinary.config({
+      cloud_name: "dqclkm2xe",
+      api_key: cloudAPIKey,
+      api_secret: cloudAPISecret,
+      secure: true,
+    });
+
+    const options = {
+      use_filename: true,
+      unique_filename: false,
+      overwrite: true,
+      format: "png",
+    };
+
+    const result = await cloudinary.uploader.upload(base64String, options);
+    return result.secure_url;
+  } catch (err) {
+    console.error("Cloudinary upload error:", err);
+    throw err;
+  }
 }
 
 module.exports = {
@@ -187,5 +433,8 @@ module.exports = {
   disconnectDB,
   getKeywordsUsingAI,
   enrichProductsWithKeywords,
-  generateImageUsingPixelBin,
+  // generateImageUsingPixelBin,
+  generateImageUsingGemini,
+  isApplicationId,
+  uploadBase64Image,
 };

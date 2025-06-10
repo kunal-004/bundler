@@ -6,7 +6,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CubeIcon,
-  SparklesIcon,
 } from "@heroicons/react/24/outline";
 
 const Sidebar = ({ companyId, applicationId }) => {

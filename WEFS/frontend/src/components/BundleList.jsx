@@ -1,5 +1,5 @@
 import React from "react";
-import BundleCard from "../BundleCard";
+import BundleCard from "./BundleCard";
 import {
   CubeTransparentIcon,
   ShoppingBagIcon,
@@ -52,6 +52,8 @@ const BundleList = ({
       </div>
     );
   }
+
+  console.log("Bundles:", bundles);
 
   if (!bundles || bundles.length === 0) {
     return (

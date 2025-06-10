@@ -20,12 +20,14 @@
     "@pixelbin/admin": "^4.1.1",
     "axios": "^1.7.2",
     "body-parser": "^1.20.2",
+    "cloudinary": "^2.6.1",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "mongoose": "^8.15.0",
     "node-fpgrowth": "^1.2.1",
     "serve-static": "^1.15.0",
+    "sharp": "^0.34.2",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {

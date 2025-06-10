@@ -3,9 +3,10 @@ import { Outlet, useParams } from "react-router-dom";
 import Header from "./src/components/Header";
 import Sidebar from "./src/components/Sidebar";
 import { AppProvider } from "./src/context/AppContext";
+import { Toaster } from "react-hot-toast";
 
 function AppContent() {
-  const { company_id, application_id } = useParams();
+  const { company_id } = useParams();
 
   const sidebarPresent = !!company_id;
 
@@ -15,9 +16,9 @@ function AppContent() {
       <Header />
       <div className="flex flex-1 pt-16">
         {" "}
-        <Sidebar companyId={company_id} applicationId={application_id} />
+        <Sidebar companyId={company_id} />
         <main
-          className={`flex-1 p-4 sm:p-6 lg:p-8 transition-all duration-300 ease-in-out bg-slate-50 overflow-y-auto 
+          className={`flex-1 p-4 sm:p-6 lg:p-8 transition-all duration-300 ease-in-out bg-slate-50 overflow-y-auto
                       ${sidebarPresent ? "md:ml-64" : "ml-0 md:ml-20"} `}
         >
           <Outlet />
@@ -30,6 +31,7 @@ function AppContent() {
 function App() {
   return (
     <AppProvider>
+      <Toaster position="top-center" reverseOrder={true} />
       <AppContent />
     </AppProvider>
   );

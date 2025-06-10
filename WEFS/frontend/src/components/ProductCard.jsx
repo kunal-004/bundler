@@ -3,8 +3,8 @@ import { CubeIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 
 const DEFAULT_NO_IMAGE_URL =
   "https://via.placeholder.com/300x300.png?text=No+Image";
-const GREEN_DOT_URL = "../assets/green-dot.svg";
-const GRAY_DOT_URL = "../assets/grey-dot.svg";
+const GREEN_DOT_URL = "/assets/green-dot.svg";
+const GRAY_DOT_URL = "/assets/gray-dot.svg";
 
 const ProductCard = ({ product }) => {
   const [imageLoadError, setImageLoadError] = useState(false);
@@ -43,7 +43,7 @@ const ProductCard = ({ product }) => {
 
   const currency = product.currency || "INR";
 
-  const isActive = product.is_active === undefined ? true : product.is_active;
+  const isActive = product.is_active;
   const brandName = product.brand?.name || "Generic Brand";
   const categoryName =
     product.category_name || product.category_slug || "Uncategorized";
@@ -136,7 +136,7 @@ const ProductCard = ({ product }) => {
           )}
         </div>
 
-        {product.tags && product.tags.length > 0 && (
+        {/* {product.tags && product.tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {product.tags.slice(0, 3).map((tag, index) => (
               <span
@@ -147,7 +147,7 @@ const ProductCard = ({ product }) => {
               </span>
             ))}
           </div>
-        )}
+        )} */}
       </div>
     </div>
   );

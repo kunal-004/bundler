@@ -10,18 +10,27 @@ const {
   SQLiteStorage,
 } = require("@gofynd/fdk-extension-javascript/express/storage");
 const sqliteInstance = new sqlite3.Database("session_storage.db");
-const generalRouter = express.Router();
+const bundleRouter = express.Router();
+const productRouter = express.Router();
+const salesChannelRouter = express.Router();
+const companyRouter = express.Router();
+
 const dotenv = require("dotenv");
 dotenv.config();
 
 const {
-  getApplicationBundles,
-  getApplicationProducts,
+  getBundles,
+  getProducts,
   generateBundles,
   saveOrderToDb,
   createBundles,
   getApplicationIds,
-  // deleteBundles,
+  generateImage,
+  updateBundle,
+  generateName,
+  getCompanyInfo,
+  generatePromptSuggestions,
+  // getAnalytics,
 } = require("./controller");
 
 const fdkExtension = setupFdk({
@@ -97,71 +106,74 @@ app.post("/api/webhook-events", async function (req, res) {
   }
 });
 
-//TODO: Comment this later
-generalRouter.get("/", async function view(req, res, next) {
-  try {
-    const { platformClient } = req;
-    const data = await platformClient.catalog.getProducts();
-    return res.json(data);
-  } catch (err) {
-    next(err);
-  }
-});
+// ----------------------------- PRODUCTS ------------------------------
 
 // Get products list for application
-generalRouter.get("/:company_id/products", async function view(req, res, next) {
-  await getApplicationProducts(req, res, next);
+productRouter.post("/products", async function view(req, res, next) {
+  await getProducts(req, res, next);
 });
 
+// ----------------------------- BUNDLES ------------------------------
+
 //Get applications bundles
-generalRouter.get(
-  "/application/:company_id",
-  async function view(req, res, next) {
-    await getApplicationBundles(req, res, next);
-  }
-);
+bundleRouter.post("/bundles", async function view(req, res, next) {
+  await getBundles(req, res, next);
+});
 
 // Generate bundles
-generalRouter.post(
-  "/application/generate_bundles",
-  async function view(req, res, next) {
-    await generateBundles(req, res, next);
-  }
-);
+bundleRouter.post("/generate_bundles", async function view(req, res, next) {
+  await generateBundles(req, res, next);
+});
 
 //Create bundles user wants
-generalRouter.post(
-  "/application/create_bundles",
-  async function view(req, res, next) {
-    await createBundles(req, res, next);
-  }
-);
+bundleRouter.post("/create_bundles", async function view(req, res, next) {
+  await createBundles(req, res, next);
+});
 
-//Create bundles user wants
-// generalRouter.post(
-//   "/application/create_bundles",
-//   async function view(req, res, next) {
-//     await createBundles(req, res, next);
-//   }
-// );
+// Creates a title
+bundleRouter.post("/generate_name", async function view(req, res, next) {
+  await generateName(req, res, next);
+});
+
+// Creates an image
+bundleRouter.post("/generate_image", async function view(req, res, next) {
+  await generateImage(req, res, next);
+});
+
+// Update bundle
+bundleRouter.put("/update_bundle", async function view(req, res, next) {
+  await updateBundle(req, res, next);
+});
+
+// generate prompt suggestions for bundle
+bundleRouter.post("/prompt_suggestions", async function view(req, res, next) {
+  await generatePromptSuggestions(req, res, next);
+});
+
+// ----------------------------- SALES CHANNELS ------------------------------
 
 //Sales channel route
-generalRouter.get("/ids", async function view(req, res, next) {
+salesChannelRouter.get("/ids", async function view(req, res, next) {
   await getApplicationIds(req, res, next);
 });
 
-// //Delete the bundles that user wants
-// generalRouter.post(
-//   "/application/:application_id/delete_bundles",
-//   async function view(req, res, next) {
-//     await deleteBundles(req, res, next);
-//   }
-// );
+// ----------------------------- COMPANY ------------------------------
+// Get company info
+companyRouter.post("/info", async function view(req, res, next) {
+  await getCompanyInfo(req, res, next);
+});
+
+// companyRouter.post("/analytics", async function view(req, res, next) {
+//   await getAnalytics(req, res, next);
+// });
+
+// ----------------------------- ROUTES ------------------------------
 
 // FDK extension api route which has auth middleware and FDK client instance attached to it.
-platformApiRoutes.use("/sales-channels", generalRouter);
-platformApiRoutes.use("/product", generalRouter);
-platformApiRoutes.use("/bundle", generalRouter);
+platformApiRoutes.use("/sales-channels", salesChannelRouter);
+platformApiRoutes.use("/product", productRouter);
+platformApiRoutes.use("/bundle", bundleRouter);
+platformApiRoutes.use("/company", companyRouter);
 
 // If you are adding routes outside of the /api path,
 // remember to also add a proxy rule for them in /frontend/vite.config.js

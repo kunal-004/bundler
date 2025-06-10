@@ -1,18 +1,34 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
-import BundleList from "../components/bundles/BundleList";
+import BundleList from "../components/BundleList";
 import LoadingSpinner from "../components/LoadingSpinner";
 import SearchFilter from "../components/SearchFilter";
 import {
   PlusCircleIcon,
   ChartBarIcon,
-  ArrowUpIcon,
-  ArrowDownIcon,
-  FunnelIcon,
   CubeTransparentIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "@heroicons/react/24/outline";
 import { Grid3X3, List, TrendingUp, Package } from "lucide-react";
+
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
 
 const BundlesPage = () => {
   const navigate = useNavigate();
@@ -23,17 +39,26 @@ const BundlesPage = () => {
     fetchBundles,
     companyId,
     applicationId,
+    bundlePagination,
   } = useAppContext();
+
   const [searchTerm, setSearchTerm] = useState("");
   const [viewMode, setViewMode] = useState("grid");
-  const [sortBy, setSortBy] = useState({ field: "name", direction: "asc" });
-  const [showFilters, setShowFilters] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const bundlesPerPage = 12;
+
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   useEffect(() => {
     if (companyId) {
-      fetchBundles();
+      fetchBundles(currentPage, bundlesPerPage, false, debouncedSearchTerm);
     }
-  }, [companyId, fetchBundles]);
+  }, [companyId, currentPage, debouncedSearchTerm]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchTerm]);
 
   const handleCreateBundle = () => {
     navigate(`/company/${companyId}/bundles/create`);
@@ -51,70 +76,30 @@ const BundlesPage = () => {
   };
 
   const bundleStats = {
-    total: bundles.length,
+    total: bundlePagination.totalItems || bundles.length,
     active: bundles.filter((b) => b.is_active).length,
     aiGenerated: bundles.filter((b) => b.type === "AI").length,
-    totalProducts: bundles.reduce(
-      (sum, b) => sum + (b.products?.length || 0),
-      0
-    ),
+    totalProducts: (() => {
+      const allProductUids = bundles.reduce((acc, bundle) => {
+        if (bundle.products) {
+          bundle.products.forEach((product) => {
+            acc.add(product.product_uid);
+          });
+        }
+        return acc;
+      }, new Set());
+      return allProductUids.size;
+    })(),
   };
 
-  const filteredAndSortedBundles = bundles
-    .filter(
-      (bundle) =>
-        bundle.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        bundle.description?.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-    .sort((a, b) => {
-      const direction = sortBy.direction === "asc" ? 1 : -1;
-      if (sortBy.field === "name") {
-        return direction * (a.name || "").localeCompare(b.name || "");
-      }
-      if (sortBy.field === "products") {
-        return (
-          direction * ((a.products?.length || 0) - (b.products?.length || 0))
-        );
-      }
-      if (sortBy.field === "price") {
-        return direction * ((a.bundle_price || 0) - (b.bundle_price || 0));
-      }
-      return 0;
-    });
-
-  const handleSort = (field) => {
-    setSortBy((prev) => ({
-      field,
-      direction:
-        prev.field === field && prev.direction === "asc" ? "desc" : "asc",
-    }));
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const SortButton = ({ field, label }) => (
-    <button
-      onClick={() => handleSort(field)}
-      className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-        sortBy.field === field
-          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-purple-500/25"
-          : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200 hover:border-gray-300"
-      }`}
-      aria-label={`Sort by ${label} ${
-        sortBy.field === field
-          ? sortBy.direction === "asc"
-            ? "ascending"
-            : "descending"
-          : ""
-      }`}
-    >
-      <span>{label}</span>
-      {sortBy.field === field &&
-        (sortBy.direction === "asc" ? (
-          <ArrowUpIcon className="h-4 w-4" />
-        ) : (
-          <ArrowDownIcon className="h-4 w-4" />
-        ))}
-    </button>
-  );
+  const handleSearch = (searchValue) => {
+    setSearchTerm(searchValue);
+  };
 
   const StatCard = ({ title, value, icon: Icon, color, trend }) => (
     <div className="relative overflow-hidden bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg transition-all duration-300 group">
@@ -147,10 +132,109 @@ const BundlesPage = () => {
     </div>
   );
 
+  const PaginationControls = () => {
+    const totalPages = bundlePagination.totalPages || 1;
+    const currentPageNum = bundlePagination.currentPage || currentPage;
+    const totalItems = bundlePagination.totalItems || 0;
+
+    const pageNumbers = [];
+    const maxVisiblePages = 5;
+
+    let startPage = Math.max(
+      1,
+      currentPageNum - Math.floor(maxVisiblePages / 2)
+    );
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+    if (endPage - startPage + 1 < maxVisiblePages) {
+      startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      pageNumbers.push(i);
+    }
+
+    const startIndex = (currentPageNum - 1) * bundlesPerPage + 1;
+    const endIndex = Math.min(currentPageNum * bundlesPerPage, totalItems);
+
+    return (
+      <div className="flex items-center justify-between mt-8">
+        <div className="flex items-center text-sm text-gray-700">
+          <span>
+            Showing {startIndex} to {endIndex} of {totalItems} bundles
+          </span>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => handlePageChange(currentPageNum - 1)}
+            disabled={currentPageNum === 1}
+            className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeftIcon className="w-4 h-4 mr-1" />
+            Previous
+          </button>
+
+          <div className="flex items-center space-x-1">
+            {startPage > 1 && (
+              <>
+                <button
+                  onClick={() => handlePageChange(1)}
+                  className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  1
+                </button>
+                {startPage > 2 && (
+                  <span className="px-2 py-2 text-sm text-gray-500">...</span>
+                )}
+              </>
+            )}
+
+            {pageNumbers.map((page) => (
+              <button
+                key={page}
+                onClick={() => handlePageChange(page)}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  currentPageNum === page
+                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg"
+                    : "text-gray-700 bg-white border border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+
+            {endPage < totalPages && (
+              <>
+                {endPage < totalPages - 1 && (
+                  <span className="px-2 py-2 text-sm text-gray-500">...</span>
+                )}
+                <button
+                  onClick={() => handlePageChange(totalPages)}
+                  className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  {totalPages}
+                </button>
+              </>
+            )}
+          </div>
+
+          <button
+            onClick={() => handlePageChange(currentPageNum + 1)}
+            disabled={currentPageNum === totalPages}
+            className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Next
+            <ChevronRightIcon className="w-4 h-4 ml-1" />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header Section */}
         <div className="mb-8">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-8">
             <div className="space-y-2">
@@ -158,13 +242,12 @@ const BundlesPage = () => {
                 Product Bundles
               </h1>
               <p className="text-sm text-gray-600 max-w-xl">
-                Create intelligent product bundles with AI to boost sales and
-                enhance customer experience
+                Create and manage product bundles to enhance your offerings.
               </p>
             </div>
             <button
               onClick={handleCreateBundle}
-              className="inline-flex items-center gap-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl  transition-all duration-300 transform hover:scale-105"
+              className="inline-flex items-center gap-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
               aria-label="Create new product bundle"
             >
               <PlusCircleIcon className="h-5 w-5" />
@@ -196,10 +279,7 @@ const BundlesPage = () => {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-8">
             <div className="flex flex-col xl:flex-row items-stretch xl:items-center gap-4">
               <div className="flex-1">
-                <SearchFilter
-                  onSearch={setSearchTerm}
-                  onFilter={() => setShowFilters(!showFilters)}
-                />
+                <SearchFilter onSearch={handleSearch} />
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
@@ -227,58 +307,37 @@ const BundlesPage = () => {
                     <List className="h-5 w-5" />
                   </button>
                 </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <FunnelIcon className="h-5 w-5 text-gray-500" />
-                    <span className="text-sm font-medium text-gray-700">
-                      Sort by:
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <SortButton field="name" label="Name" />
-                    <SortButton field="products" label="Products" />
-                    <SortButton field="price" label="Price" />
-                  </div>
-                </div>
               </div>
             </div>
 
-            {searchTerm && (
+            {(searchTerm || debouncedSearchTerm) && (
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <p className="text-sm text-gray-600">
                   Showing{" "}
                   <span className="font-semibold text-gray-900">
-                    {filteredAndSortedBundles.length}
+                    {bundlePagination.totalItems || 0}
                   </span>{" "}
-                  of{" "}
-                  <span className="font-semibold text-gray-900">
-                    {bundles.length}
-                  </span>{" "}
-                  bundles
-                  {searchTerm && (
-                    <span>
-                      {" "}
-                      for "
-                      <span className="font-semibold text-purple-600">
-                        {searchTerm}
-                      </span>
-                      "
+                  results
+                  <span>
+                    {" "}
+                    for "
+                    <span className="font-semibold text-purple-600">
+                      {debouncedSearchTerm || searchTerm}
                     </span>
-                  )}
+                    "
+                  </span>
                 </p>
               </div>
             )}
           </div>
         </div>
 
-        {isLoadingBundles && !bundles.length && (
+        {isLoadingBundles && (
           <div className="flex items-center justify-center py-16">
             <LoadingSpinner message="Loading your bundles..." />
           </div>
         )}
 
-        {/* Error State */}
         {!isLoadingBundles && bundleError && (
           <div
             className="bg-red-50 border border-red-200 rounded-2xl p-6 mb-8"
@@ -312,7 +371,7 @@ const BundlesPage = () => {
 
         {!isLoadingBundles && !bundleError && (
           <div className="space-y-6">
-            {filteredAndSortedBundles.length === 0 ? (
+            {bundles.length === 0 && !debouncedSearchTerm ? (
               <div className="text-center py-16">
                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Package className="h-8 w-8 text-gray-400" />
@@ -321,27 +380,35 @@ const BundlesPage = () => {
                   No bundles found
                 </h3>
                 <p className="text-gray-600 mb-6">
-                  {searchTerm
-                    ? "Try adjusting your search terms"
-                    : "Get started by creating your first bundle"}
+                  Get started by creating your first bundle
                 </p>
-                {!searchTerm && (
-                  <button
-                    onClick={handleCreateBundle}
-                    className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-purple-500/25 hover:shadow-xl hover:shadow-purple-500/30 transition-all duration-300"
-                  >
-                    <PlusCircleIcon className="h-5 w-5" />
-                    Create Your First Bundle
-                  </button>
-                )}
+                <button
+                  onClick={handleCreateBundle}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-purple-500/25 hover:shadow-xl hover:shadow-purple-500/30 transition-all duration-300"
+                >
+                  <PlusCircleIcon className="h-5 w-5" />
+                  Create Your First Bundle
+                </button>
+              </div>
+            ) : bundles.length === 0 && debouncedSearchTerm ? (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Package className="h-8 w-8 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  No bundles found for "{debouncedSearchTerm}"
+                </h3>
               </div>
             ) : (
-              <BundleList
-                bundles={filteredAndSortedBundles}
-                viewMode={viewMode}
-                onView={handleViewBundle}
-                onEdit={handleEditBundle}
-              />
+              <>
+                <BundleList
+                  bundles={bundles}
+                  viewMode={viewMode}
+                  onView={handleViewBundle}
+                  onEdit={handleEditBundle}
+                />
+                <PaginationControls />
+              </>
             )}
           </div>
         )}

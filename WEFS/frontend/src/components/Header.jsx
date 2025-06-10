@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
-import { SparklesIcon, BellIcon } from "@heroicons/react/24/outline";
+import { SparklesIcon } from "@heroicons/react/24/outline";
 
 const Header = () => {
   const { companyId, applicationId } = useAppContext();
@@ -25,14 +25,6 @@ const Header = () => {
             </div>
             <span className="tracking-tight">AI Bundler</span>
           </Link>
-        </div>
-
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <button className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors duration-200">
-              <BellIcon className="h-5 w-5" />
-            </button>
-          </div>
         </div>
       </div>
     </header>

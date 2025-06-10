@@ -1,24 +1,60 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import {
   ArrowLeftIcon,
   CubeIcon,
-  ShoppingBagIcon,
   CalendarIcon,
   TagIcon,
   UserIcon,
   ClockIcon,
   PencilSquareIcon,
+  CurrencyRupeeIcon,
+  InformationCircleIcon,
+  SparklesIcon,
+  CheckCircleIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import LoadingSpinner from "../components/LoadingSpinner";
+import ProductCard from "../components/ProductCard";
+import AiContentSuggestions from "../components/AiContentSuggestions";
+
+const InfoItem = ({ icon: Icon, label, value }) => (
+  <div className="flex items-start space-x-3">
+    <Icon className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+    <div className="min-w-0 flex-1">
+      <p className="text-sm font-medium text-gray-500">{label}</p>
+      <p className="text-sm text-gray-900 mt-1">{value}</p>
+    </div>
+  </div>
+);
 
 const ViewBundlePage = () => {
   const { bundle_id } = useParams();
   const navigate = useNavigate();
-  const { companyId, applicationId, bundles, isLoadingBundles } =
-    useAppContext();
+  const {
+    companyId,
+    applicationId,
+    bundles,
+    isLoadingBundles,
+    products,
+    allProducts,
+    fetchAllProductsRecursively,
+    isLoadingProducts,
+  } = useAppContext();
+
   const [bundle, setBundle] = useState(null);
+  const [showAiSuggestions, setShowAiSuggestions] = useState(false);
+  const [hasInitiatedFullProductFetch, setHasInitiatedFullProductFetch] =
+    useState(false);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  const productsSource = useMemo(() => {
+    return applicationId ? products.items : allProducts.items;
+  }, [applicationId, products.items, allProducts.items]);
 
   useEffect(() => {
     if (bundles && bundle_id) {
@@ -29,20 +65,71 @@ const ViewBundlePage = () => {
     }
   }, [bundles, bundle_id]);
 
+  useEffect(() => {
+    if (bundle && productsSource && !hasInitiatedFullProductFetch) {
+      const bundleProductUids = new Set(
+        bundle.products?.map((bp) => bp.product_uid) || []
+      );
+
+      const missingProductUids = [...bundleProductUids].filter(
+        (uid) => !productsSource.some((p) => p.uid === uid)
+      );
+
+      if (missingProductUids.length > 0) {
+        console.log(
+          `ViewBundlePage: Found ${missingProductUids.length} bundle products missing from current product list. Initiating full product fetch.`
+        );
+        fetchAllProductsRecursively(!!applicationId);
+        setHasInitiatedFullProductFetch(true);
+      }
+    }
+  }, [
+    bundle,
+    productsSource,
+    hasInitiatedFullProductFetch,
+    fetchAllProductsRecursively,
+    applicationId,
+  ]);
+
+  const getBundleProductsWithDetails = useMemo(() => {
+    if (!bundle || isLoadingProducts || !productsSource) {
+      return [];
+    }
+
+    return bundle.products.map((bundleProduct) => {
+      const fullProduct = productsSource.find(
+        (product) => product.uid === bundleProduct.product_uid
+      );
+
+      if (!fullProduct) {
+        return {
+          ...bundleProduct,
+          name: `Product #${bundleProduct.product_uid}`,
+          notFound: true,
+        };
+      }
+
+      return {
+        ...fullProduct,
+        ...bundleProduct,
+        bundleProductId: bundleProduct.product_uid,
+      };
+    });
+  }, [bundle, productsSource, isLoadingProducts]);
+
   const getNavigatePath = () => {
-    if (companyId)
+    if (companyId && applicationId)
       return `/company/${companyId}/application/${applicationId}/bundles`;
     if (companyId) return `/company/${companyId}/bundles`;
     return "/";
   };
 
   const handleEditBundle = () => {
-    // Use bundle._id (from platform) if available, otherwise fallback to bundle.id (e.g., for AI suggestions)
     const actualBundleId = bundle?._id || bundle?.id;
 
     if (companyId && actualBundleId) {
       const editUrl = `https://platform.fynd.com/company/${companyId}/bundle/${actualBundleId}/edit`;
-      window.open(editUrl, "_blank", "noopener,noreferrer"); // Open in a new tab
+      window.open(editUrl, "_blank", "noopener,noreferrer");
     } else {
       alert(
         "Cannot determine the edit path. Company ID or Bundle ID is missing or invalid."
@@ -50,273 +137,326 @@ const ViewBundlePage = () => {
     }
   };
 
-  if (isLoadingBundles) {
+  const handleShowAiSuggestions = () => {
+    setShowAiSuggestions(true);
+  };
+
+  const handleApplyAiSuggestions = (aiContent) => {
+    setBundle((prevBundle) => ({
+      ...prevBundle,
+      logo: aiContent.logo,
+      description: aiContent.description,
+    }));
+    console.log("Applied AI suggestions to local bundle state:", aiContent);
+    setShowAiSuggestions(false);
+  };
+
+  const handleCloseAiSuggestions = () => {
+    setShowAiSuggestions(false);
+  };
+
+  if (isLoadingBundles || isLoadingProducts) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <LoadingSpinner message="Loading bundle details..." />
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <LoadingSpinner message="Loading bundle details and associated products..." />
+        </div>
       </div>
     );
   }
 
   if (!bundle) {
     return (
-      <div className="container mx-auto px-4 py-12 text-center">
-        <div className="max-w-lg mx-auto bg-red-50 border border-red-200 p-6 rounded-xl">
-          <h2 className="text-2xl font-semibold text-red-700 mb-2">
-            Bundle Not Found
-          </h2>
-          <p className="text-red-600 mb-4">
-            This bundle does not exist or was removed.
-          </p>
-          <button
-            onClick={() => navigate(getNavigatePath())}
-            className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-          >
-            <ArrowLeftIcon className="w-4 h-4 mr-2" />
-            Back to Bundles
-          </button>
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="max-w-md mx-auto text-center">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+              <div className="w-12 h-12 mx-auto bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <XMarkIcon className="w-6 h-6 text-red-600" />
+              </div>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                Bundle Not Found
+              </h2>
+              <p className="text-gray-600 mb-6">
+                This bundle does not exist or has been removed.
+              </p>
+              <button
+                onClick={() => navigate(getNavigatePath())}
+                className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
+              >
+                <ArrowLeftIcon className="w-4 h-4 mr-2" />
+                Back to Bundles
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
-  // The button will be shown if a bundle exists and companyId is present.
-  // The actualBundleId logic in handleEditBundle will determine which ID to use.
   const canAttemptEdit = companyId && (bundle?._id || bundle?.id);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-6 flex justify-between items-center">
-        <button
-          onClick={() => navigate(getNavigatePath())}
-          className="flex items-center text-sm text-slate-600 hover:text-slate-800"
-        >
-          <ArrowLeftIcon className="w-4 h-4 mr-1" />
-          Back to Bundles
-        </button>
-        {canAttemptEdit && ( // Show button if we can attempt to build an edit link
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="flex items-center justify-between mb-6">
           <button
-            onClick={handleEditBundle}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
+            onClick={() => navigate(getNavigatePath())}
+            className="inline-flex items-center text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
           >
-            <PencilSquareIcon className="w-4 h-4 mr-2" />
-            Edit Bundle on Platform
+            <ArrowLeftIcon className="w-4 h-4 mr-2" />
+            Back to Bundles
           </button>
-        )}
-      </div>
 
-      <div className="bg-blue-100 rounded-2xl text-gray-500 p-6 mb-6 shadow-lg">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div className="flex items-center">
-            {bundle.logo && (
-              <img
-                src={bundle.logo}
-                alt={bundle.name}
-                className="h-16 w-16 mr-4 object-contain"
-              />
+          <div className="flex items-center space-x-3">
+            {canAttemptEdit && (
+              <button
+                onClick={handleEditBundle}
+                className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors shadow-sm cursor-pointer"
+              >
+                <PencilSquareIcon className="w-4 h-4 mr-2" />
+                Edit Bundle
+              </button>
             )}
-            {bundle.image_url && !bundle.logo && (
-              <img
-                src={bundle.image_url}
-                alt={bundle.name}
-                className="h-16 w-16 mr-4 object-cover rounded-md bg-slate-200"
-              />
-            )}
-            <h1 className="text-2xl font-bold text-slate-800">{bundle.name}</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-4 text-sm">
-            <span className="flex items-center text-slate-700">
-              <CubeIcon className="w-5 h-5 mr-1" />{" "}
-              {bundle.products?.length || 0} Products
-            </span>
-            {bundle.choice && (
-              <span className="flex items-center text-slate-700">
-                <TagIcon className="w-5 h-5 mr-1" />{" "}
-                {bundle.choice === "single"
-                  ? "Single Choice"
-                  : "Multiple Choice"}
-              </span>
-            )}
-            <span
-              className={`px-3 py-1 rounded-full font-medium ${
-                bundle.is_active
-                  ? "bg-green-200 text-green-800"
-                  : "bg-gray-200 text-gray-800"
-              }`}
-            >
-              {bundle.is_active ? "Active" : "Inactive"}
-            </span>
+            <div className="relative group">
+              <button
+                onClick={handleShowAiSuggestions}
+                className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg text-sm font-medium rounded-md hover:bg-indigo-900 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                <SparklesIcon className="w-4 h-4 mr-2" />
+                AI Agent
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="bg-white rounded-2xl shadow-md p-6 mb-8 grid md:grid-cols-2 gap-6">
-        <div className="space-y-4">
-          <InfoRow
-            icon={UserIcon}
-            label="Created By"
-            value={
-              bundle.created_by?.username ||
-              (bundle.type === "AI_SUGGESTION" ? "AI Agent" : "Unknown")
-            }
-          />
-          <InfoRow
-            icon={CalendarIcon}
-            label="Created On"
-            value={new Date(
-              bundle.created_on || bundle.created_date
-            ).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          />
-          {bundle.modified_on && (
-            <InfoRow
-              icon={ClockIcon}
-              label="Last Modified"
-              value={new Date(bundle.modified_on).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            />
-          )}
-          <InfoRow
-            icon={TagIcon}
-            label="Bundle Source / Type" // Clarified label
-            value={
-              bundle.type === "AI_SUGGESTION"
-                ? "AI Suggested"
-                : bundle.choice
-                ? bundle.choice === "single"
-                  ? "Platform - Single Choice"
-                  : "Platform - Multiple Choice"
-                : "Platform - Standard"
-            }
-          />
-        </div>
-        <div className="space-y-4">
-          {bundle.hasOwnProperty("same_store_assignment") && (
-            <InfoRow
-              icon={ShoppingBagIcon}
-              label="Store Assignment"
-              value={
-                bundle.same_store_assignment ? "Same Store Only" : "Any Store"
-              }
-            />
-          )}
-          {bundle.bundle_price && (
-            <InfoRow
-              icon={TagIcon}
-              label="Suggested Bundle Price"
-              value={`₹${bundle.bundle_price.toFixed(2)}`}
-            />
-          )}
-          {bundle.description && (
-            <InfoRow
-              icon={CubeIcon}
-              label="Description"
-              value={bundle.description}
-            />
-          )}
-        </div>
-      </div>
-
-      <div>
-        <h2 className="text-xl font-semibold text-slate-800 mb-4">
-          Products in Bundle
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {bundle.products?.map((product) => (
-            <div
-              key={product.product_uid || product.uid}
-              className="bg-slate-50 rounded-xl p-4 shadow-sm border border-slate-200"
-            >
-              <h3 className="text-slate-800 font-semibold mb-2">
-                {product.name ||
-                  `Product #${product.product_uid || product.uid}`}
-              </h3>
-
-              {product.images?.[0]?.url && (
-                <img
-                  src={product.images[0].url}
-                  alt={product.name || "Product Image"}
-                  className="w-full h-32 object-cover rounded-md mb-2 bg-slate-200"
-                />
-              )}
-              {product.media?.find((m) => m.type === "image")?.url &&
-                !product.images && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start space-x-4">
+              <div className="flex-shrink-0">
+                {bundle.logo ? (
                   <img
-                    src={product.media.find((m) => m.type === "image").url}
-                    alt={product.name || "Product Image"}
-                    className="w-full h-32 object-cover rounded-md mb-2 bg-slate-200"
+                    src={bundle.logo}
+                    alt={bundle.name}
+                    className="h-16 w-16 object-contain rounded-lg border border-gray-200 bg-gray-50"
                   />
+                ) : bundle.image_url ? (
+                  <img
+                    src={bundle.image_url}
+                    alt={bundle.name}
+                    className="h-16 w-16 object-cover rounded-lg border border-gray-200"
+                  />
+                ) : (
+                  <div className="h-16 w-16 bg-gray-100 rounded-lg border border-gray-200 flex items-center justify-center">
+                    <CubeIcon className="h-8 w-8 text-gray-400" />
+                  </div>
                 )}
+              </div>
 
-              <div className="space-y-1 text-sm text-slate-600">
-                {product.hasOwnProperty("min_quantity") && (
-                  <ProductRow label="Min Qty" value={product.min_quantity} />
-                )}
-                {product.hasOwnProperty("max_quantity") && (
-                  <ProductRow label="Max Qty" value={product.max_quantity} />
-                )}
-                {product.hasOwnProperty("auto_add_to_cart") && (
-                  <ProductRow
-                    label="Auto Add"
-                    value={product.auto_add_to_cart ? "Yes" : "No"}
-                  />
-                )}
-                {product.hasOwnProperty("auto_select") && (
-                  <ProductRow
-                    label="Auto Select"
-                    value={product.auto_select ? "Yes" : "No"}
-                  />
-                )}
-                {product.hasOwnProperty("allow_remove") && (
-                  <ProductRow
-                    label="Allow Remove"
-                    value={product.allow_remove ? "Yes" : "No"}
-                  />
-                )}
+              <div className="min-w-0 flex-1">
+                <h1 className="text-2xl font-bold text-gray-900 mb-1">
+                  {bundle.name}
+                </h1>
+                <p className="text-sm text-gray-500 mb-3">
+                  Bundle ID: {bundle.id || bundle._id}
+                </p>
 
-                {product.price?.effective?.max && (
-                  <ProductRow
-                    label="Price"
-                    value={`₹${product.price.effective.max.toFixed(2)}`}
-                  />
-                )}
-                {!product.price?.effective?.max &&
-                  product.price?.effective?.min && (
-                    <ProductRow
-                      label="Price"
-                      value={`₹${product.price.effective.min.toFixed(2)}`}
-                    />
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <CubeIcon className="w-3 h-3 mr-1" />
+                    {getBundleProductsWithDetails.length} Products
+                  </span>
+
+                  {bundle.choice && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                      <TagIcon className="w-3 h-3 mr-1" />
+                      {bundle.choice === "single"
+                        ? "Single Choice"
+                        : "Multiple Choice"}
+                    </span>
                   )}
+
+                  <span
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      bundle.is_active
+                        ? "bg-green-100 text-green-800"
+                        : "bg-gray-100 text-gray-800"
+                    }`}
+                  >
+                    {bundle.is_active ? (
+                      <CheckCircleIcon className="w-3 h-3 mr-1" />
+                    ) : (
+                      <XMarkIcon className="w-3 h-3 mr-1" />
+                    )}
+                    {bundle.is_active ? "Active" : "Inactive"}
+                  </span>
+                </div>
               </div>
             </div>
-          ))}
+          </div>
+        </div>
+
+        {showAiSuggestions && (
+          <div className="mb-6">
+            <AiContentSuggestions
+              bundle={bundle}
+              products={getBundleProductsWithDetails}
+              onApply={handleApplyAiSuggestions}
+              onClose={handleCloseAiSuggestions}
+            />
+          </div>
+        )}
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Bundle Details
+              </h3>
+
+              <div className="space-y-4">
+                <InfoItem
+                  icon={UserIcon}
+                  label="Created By"
+                  value={
+                    bundle.created_by?.username ||
+                    (bundle.type === "AI_SUGGESTION" ? "AI Agent" : "Unknown")
+                  }
+                />
+
+                <InfoItem
+                  icon={CalendarIcon}
+                  label="Created On"
+                  value={new Date(
+                    bundle.created_on || bundle.created_date
+                  ).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                />
+
+                {bundle.modified_on && (
+                  <InfoItem
+                    icon={ClockIcon}
+                    label="Last Modified"
+                    value={new Date(bundle.modified_on).toLocaleDateString(
+                      "en-US",
+                      {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      }
+                    )}
+                  />
+                )}
+
+                <InfoItem
+                  icon={TagIcon}
+                  label="Bundle Type"
+                  value={
+                    bundle.type === "AI_SUGGESTION"
+                      ? "AI Generated"
+                      : bundle.choice
+                      ? `${
+                          bundle.choice === "single" ? "Single" : "Multiple"
+                        } Choice`
+                      : "Standard Bundle"
+                  }
+                />
+
+                {bundle.bundle_price && (
+                  <InfoItem
+                    icon={CurrencyRupeeIcon}
+                    label="Bundle Price"
+                    value={`₹${bundle.bundle_price.toFixed(2)}`}
+                  />
+                )}
+              </div>
+            </div>
+
+            {bundle.description && (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+                  <InformationCircleIcon className="w-5 h-5 mr-2 text-gray-400" />
+                  Description
+                </h3>
+                <p className="text-gray-700 text-sm leading-relaxed">
+                  {bundle.description}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Bundle Products
+                  </h3>
+                  <span className="text-sm text-gray-500">
+                    {getBundleProductsWithDetails.length} item
+                    {getBundleProductsWithDetails.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-6">
+                {/* Condition 1: Bundle has products, but none could be resolved after all attempts */}
+                {getBundleProductsWithDetails.length === 0 &&
+                bundle.products?.length > 0 ? (
+                  <div className="text-center py-12">
+                    <CubeIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">
+                      Products Not Found
+                    </h3>
+                    <p className="text-gray-600">
+                      This bundle contains products that could not be loaded.
+                      They might be inactive or removed from the catalog.
+                    </p>
+                  </div>
+                ) : getBundleProductsWithDetails.length === 0 &&
+                  bundle.products?.length === 0 ? (
+                  <div className="text-center py-12">
+                    <CubeIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">
+                      No Products in Bundle
+                    </h3>
+                    <p className="text-gray-600">
+                      This bundle does not contain any products.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
+                    {getBundleProductsWithDetails.map((product, index) => (
+                      <div
+                        key={product.bundleProductId || product.id || index}
+                        className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                      >
+                        <ProductCard
+                          product={product}
+                          showBundleInfo={true}
+                          bundleQuantity={product.quantity}
+                          bundlePrice={product.price}
+                        />
+                        {product.notFound && (
+                          <div className="mt-2 px-3 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full inline-flex items-center">
+                            <XMarkIcon className="w-3 h-3 mr-1" />
+                            Product not found (Missing from catalog)
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 };
-
-const InfoRow = ({ icon: Icon, label, value }) => (
-  <div>
-    <h4 className="text-sm text-slate-500 mb-1">{label}</h4>
-    <div className="flex items-center text-slate-700">
-      <Icon className="w-5 h-5 mr-2 text-slate-400" />
-      {value || "N/A"}
-    </div>
-  </div>
-);
-
-const ProductRow = ({ label, value }) => (
-  <div className="flex justify-between">
-    <span className="text-slate-500">{label}:</span>
-    <span className="text-slate-700">{value}</span>
-  </div>
-);
 
 export default ViewBundlePage;

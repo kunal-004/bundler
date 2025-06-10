@@ -3,7 +3,6 @@ import { createBrowserRouter } from "react-router-dom";
 import App from "./App";
 import NotFound from "./src/pages/NotFound";
 import Home from "./src/pages/Home";
-import ProductsPage from "./src/pages/ProductsPage";
 import BundlesPage from "./src/pages/BundlesPage";
 import AnalyticsPage from "./src/pages/AnalyticsPage";
 import CreateBundlePage from "./src/pages/CreateBundlePage";
@@ -17,10 +16,6 @@ const router = createBrowserRouter([
       {
         index: true,
         element: <Home />,
-      },
-      {
-        path: "products",
-        element: <ProductsPage />,
       },
       {
         path: "bundles",
@@ -49,10 +44,6 @@ const router = createBrowserRouter([
         element: <Home />,
       },
       {
-        path: "products",
-        element: <ProductsPage />,
-      },
-      {
         path: "bundles",
         element: <BundlesPage />,
       },
@@ -77,3 +68,24 @@ const router = createBrowserRouter([
 ]);
 
 export default router;
+
+// import { createBrowserRouter } from "react-router-dom";
+// import App from "./App";
+// import NotFound from "./src/pages/NotFound";
+
+// const router = createBrowserRouter([
+//   {
+//     path: "/company/:company_id/",
+//     element: <App />,
+//   },
+//   {
+//     path: "/company/:company_id/application/:application_id",
+//     element: <App />,
+//   },
+//   {
+//     path: "/*", // Fallback route for all unmatched paths
+//     element: <NotFound />, // Component to render for unmatched paths
+//   },
+// ]);
+
+// export default router;

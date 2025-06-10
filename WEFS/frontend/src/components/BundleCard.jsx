@@ -2,16 +2,144 @@ import React, { useState } from "react";
 import {
   CubeTransparentIcon,
   ShoppingBagIcon,
-  CalendarIcon,
+  CalendarDaysIcon,
   ChevronRightIcon,
   PhotoIcon,
   TagIcon,
+  ClockIcon,
 } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolid } from "@heroicons/react/24/solid";
 
 const DEFAULT_BUNDLE_IMAGE_URL = "/assets/default_icon_listing.png";
 
-const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
+const timeAgo = (dateString) => {
+  if (!dateString) return "";
+
+  try {
+    let cleanDateString = dateString;
+    if (dateString.includes(".")) {
+      const parts = dateString.split(".");
+      if (parts.length === 2 && parts[1].length > 3) {
+        cleanDateString = parts[0] + "." + parts[1].substring(0, 3);
+      }
+    }
+
+    if (
+      !cleanDateString.includes("Z") &&
+      !cleanDateString.includes("+") &&
+      !cleanDateString.includes("-", 10)
+    ) {
+      cleanDateString += "Z";
+    }
+
+    const date = new Date(cleanDateString);
+
+    if (isNaN(date.getTime())) {
+      console.warn("Invalid date:", dateString);
+      return "";
+    }
+
+    const now = new Date();
+    const diffInMilliseconds = now.getTime() - date.getTime();
+
+    if (diffInMilliseconds < 0) {
+      const absDiff = Math.abs(diffInMilliseconds);
+      if (absDiff < 60000) return "just now";
+      return "in future";
+    }
+
+    const seconds = Math.floor(diffInMilliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    const weeks = Math.floor(days / 7);
+    const months = Math.floor(days / 30.44);
+    const years = Math.floor(days / 365.25);
+
+    if (seconds < 10) return "just now";
+    if (seconds < 60) return `${seconds} sec ago`;
+    if (minutes < 60) return `${minutes} min ago`;
+    if (hours < 24) return `${hours} hr ago`;
+    if (days < 7) return `${days} day${days !== 1 ? "s" : ""} ago`;
+    if (weeks < 5) return `${weeks} wk${weeks !== 1 ? "s" : ""} ago`;
+    if (months < 12) return `${months} mo${months !== 1 ? "s" : ""} ago`;
+    return `${years} yr${years !== 1 ? "s" : ""} ago`;
+  } catch (error) {
+    console.warn("Date parsing error:", error, "for date:", dateString);
+    return "";
+  }
+};
+
+const parseDate = (dateString) => {
+  if (!dateString) return null;
+
+  try {
+    let cleanDateString = dateString;
+
+    if (dateString.includes(".") && dateString.includes("T")) {
+      const parts = dateString.split(".");
+      if (parts.length === 2) {
+        const microsecondPart = parts[1];
+        const timezoneMatch = microsecondPart.match(/([+-]\d{2}:?\d{2}|Z)$/);
+        const timezone = timezoneMatch ? timezoneMatch[1] : "";
+        const digits = microsecondPart.replace(/([+-]\d{2}:?\d{2}|Z)$/, "");
+
+        if (digits.length > 3) {
+          cleanDateString = parts[0] + "." + digits.substring(0, 3) + timezone;
+        }
+      }
+    }
+
+    let date = new Date(cleanDateString);
+
+    if (isNaN(date.getTime())) {
+      date = new Date(dateString);
+    }
+
+    if (isNaN(date.getTime())) {
+      if (
+        !dateString.includes("Z") &&
+        !dateString.includes("+") &&
+        !dateString.includes("-", 10)
+      ) {
+        date = new Date(dateString + "Z");
+      }
+    }
+
+    return isNaN(date.getTime()) ? null : date;
+  } catch (error) {
+    console.warn("Date parsing error:", error, "for date:", dateString);
+    return null;
+  }
+};
+
+const getMostRecentDate = (createdDate, modifiedDate) => {
+  if (!createdDate && !modifiedDate) return null;
+  if (!createdDate) return modifiedDate;
+  if (!modifiedDate) return createdDate;
+
+  const created = parseDate(createdDate);
+  const modified = parseDate(modifiedDate);
+
+  if (!created && !modified) return null;
+  if (!created) return modifiedDate;
+  if (!modified) return createdDate;
+
+  return modified > created ? modifiedDate : createdDate;
+};
+
+const wasModified = (createdDate, modifiedDate) => {
+  if (!createdDate || !modifiedDate) return false;
+
+  const created = parseDate(createdDate);
+  const modified = parseDate(modifiedDate);
+
+  if (!created || !modified) return false;
+
+  return Math.abs(modified - created) > 5000;
+};
+
+const BundleCard = ({ bundle, viewMode = "grid", onView }) => {
   const [imageError, setImageError] = useState(false);
 
   if (!bundle) return null;
@@ -20,6 +148,12 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
   const isActive = bundle.is_active;
   const productCount = bundle.products?.length || 0;
   const bundlePrice = bundle.bundle_price || 0;
+  const createdDate = bundle.created_on;
+  const modifiedDate = bundle.modified_on || bundle.updated_on;
+
+  const mostRecentDate = getMostRecentDate(createdDate, modifiedDate);
+  const isModified = wasModified(createdDate, modifiedDate);
+  const timeSinceLastAction = timeAgo(mostRecentDate);
 
   const handleImageError = () => {
     setImageError(true);
@@ -60,13 +194,13 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
         <div className="flex -space-x-2">
           {displayProducts.map((product, index) => (
             <div
-              key={product.id || index}
+              key={product.id || product.product_uid || index}
               className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-100 to-indigo-100 border-2 border-white flex items-center justify-center overflow-hidden"
             >
               {product.image_url ? (
                 <img
                   src={product.image_url}
-                  alt={product.name}
+                  alt={product.name || `Product ${index + 1}`}
                   className="w-full h-full object-cover"
                 />
               ) : (
@@ -115,9 +249,6 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
               <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-900 transition-colors truncate">
                 {bundle.name}
               </h3>
-              <p className="text-sm text-gray-600 mt-1 line-clamp-2 leading-relaxed">
-                {bundle.description || "No description available."}
-              </p>
             </div>
             <StatusBadge className="ml-4 flex-shrink-0" />
           </div>
@@ -129,9 +260,7 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
                 <span className="font-medium">{productCount}</span>
                 <span className="text-gray-500">products</span>
               </div>
-
               <ProductPreview products={bundle.products} />
-
               {bundlePrice > 0 && (
                 <div className="flex items-center space-x-2">
                   <TagIcon className="h-4 w-4 text-green-500" />
@@ -140,17 +269,29 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
                   </span>
                 </div>
               )}
-
-              {bundle.created_date && (
-                <div className="flex items-center space-x-1 text-xs text-gray-500">
-                  <CalendarIcon className="h-3 w-3" />
-                  <span>
-                    {new Date(bundle.created_date).toLocaleDateString()}
-                  </span>
+            </div>
+          </div>
+          {mostRecentDate && (
+            <div className="mt-2 flex items-center space-x-4 text-xs text-gray-500">
+              <div className="flex items-center space-x-1">
+                <CalendarDaysIcon className="h-3.5 w-3.5" />
+                <span>
+                  {isModified ? "Modified " : "Created "}
+                  {new Date(mostRecentDate).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </span>
+              </div>
+              {timeSinceLastAction && (
+                <div className="flex items-center space-x-1">
+                  <ClockIcon className="h-3.5 w-3.5" />
+                  <span>{timeSinceLastAction}</span>
                 </div>
               )}
             </div>
-          </div>
+          )}
         </div>
 
         <ChevronRightIcon className="h-5 w-5 text-gray-300 group-hover:text-blue-400 group-hover:translate-x-1 transition-all duration-200 ml-4" />
@@ -164,7 +305,7 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
       onClick={handleCardClick}
     >
       <div className="relative bg-gradient-to-br from-blue-50 to-indigo-50 p-5 flex items-center justify-center">
-        <div className="w-25 h-25 rounded-xl overflow-hidden shadow-sm ring-1 ring-gray-200 group-hover:ring-blue-300 transition-all duration-200 bg-white flex items-center justify-center">
+        <div className="w-30 h-30 rounded-xl overflow-hidden shadow-sm ring-1 ring-gray-200 group-hover:ring-blue-300 transition-all duration-200 bg-white flex items-center justify-center">
           {!imageError ? (
             <img
               src={imageUrl}
@@ -178,7 +319,6 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
             </div>
           )}
         </div>
-
         <div className="absolute top-3 right-3">
           <StatusBadge />
         </div>
@@ -202,10 +342,6 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
               </div>
             )}
           </div>
-
-          <p className="text-sm text-gray-600 line-clamp-2 leading-relaxed mt-2 min-h-[40px]">
-            {bundle.description || "No description available."}
-          </p>
         </div>
 
         <div className="mt-auto">
@@ -218,7 +354,6 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
               </div>
               <ProductPreview products={bundle.products} />
             </div>
-
             {bundlePrice > 0 && (
               <div className="flex items-center space-x-1">
                 <TagIcon className="h-4 w-4 text-green-500" />
@@ -229,23 +364,34 @@ const BundleCard = ({ bundle, viewMode = "grid", onView, onEdit }) => {
             )}
           </div>
 
-          <div className="flex items-center justify-between border-t border-gray-100 pt-3">
-            {bundle.created_date && (
-              <div className="flex items-center space-x-1 text-xs text-gray-500">
-                <CalendarIcon className="h-3.5 w-3.5" />
-                <span>
-                  {new Date(bundle.created_date).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </span>
+          <div className="border-t border-gray-100 pt-3">
+            {mostRecentDate && (
+              <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+                <div className="flex items-center space-x-1">
+                  <span>
+                    {isModified ? "Modified " : "Created "}
+                    {new Date(mostRecentDate).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </span>
+                </div>
+                {timeSinceLastAction && (
+                  <div className="flex items-center space-x-1">
+                    <ClockIcon className="h-3.5 w-3.5" />
+                    <span>{timeSinceLastAction}</span>
+                  </div>
+                )}
               </div>
             )}
 
             <button
-              onClick={() => onView?.(bundle)}
-              className="text-sm hover: font-medium text-blue-600 hover:text-blue-800 transition-colors flex items-center"
+              onClick={(e) => {
+                e.stopPropagation();
+                onView?.(bundle);
+              }}
+              className="w-full text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center py-2 bg-blue-50 hover:bg-blue-100 rounded-md"
             >
               View details
               <ChevronRightIcon className="h-4 w-4 ml-1" />

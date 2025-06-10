@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 
-const SearchFilter = ({ onSearch, onFilter }) => {
+const SearchFilter = ({ onSearch }) => {
   const [searchTerm, setSearchTerm] = useState("");
 
   const handleSearchChange = (e) => {

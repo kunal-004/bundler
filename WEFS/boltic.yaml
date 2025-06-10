@@ -1,10 +1,14 @@
-app: WEFS docker
+app: WEFS-docker
 region: asia-south1
-entrypoint: "index.js"
+entrypoint: "/WEFS/index.js"
+language: nodejs/18
+
+settings:
+  nodejs:
+    common_js: true
 
 build:
-  builtin: dockerfile
-  ignorefile: .gitignore
+  builtin: Dockerfile
 
 env:
-  PORT: '8080'
+  PORT: 8080
