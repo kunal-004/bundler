@@ -23,8 +23,8 @@
       "dest": "api/server.js"
     },
     {
-      "src": "/static/(.*)",
-      "dest": "frontend/dist/static/$1"
+      "src": "/assets/(.*)",
+      "dest": "frontend/dist/assets/$1"
     },
     {
       "src": "/(.*)",
