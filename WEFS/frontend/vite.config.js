@@ -8,7 +8,7 @@ export default defineConfig({
     preserveSymlinks: true,
   },
   build: {
-    outDir: "dist",
+    outDir: "public/dist",
     emptyOutDir: true,
   },
   server: {
