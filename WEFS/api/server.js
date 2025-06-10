@@ -9,12 +9,7 @@ const { setupFdk } = require("@gofynd/fdk-extension-javascript/express");
 const {
   SQLiteStorage,
 } = require("@gofynd/fdk-extension-javascript/express/storage");
-const sqliteInstance = new sqlite3.Database("session_storage.db");
 const serverless = require("serverless-http");
-const bundleRouter = express.Router();
-const productRouter = express.Router();
-const salesChannelRouter = express.Router();
-const companyRouter = express.Router();
 
 const dotenv = require("dotenv");
 dotenv.config();
@@ -31,8 +26,10 @@ const {
   generateName,
   getCompanyInfo,
   generatePromptSuggestions,
-  // getAnalytics,
 } = require("../controller");
+
+// Initialize SQLite instance
+const sqliteInstance = new sqlite3.Database(":memory:"); // Use in-memory DB for serverless
 
 const fdkExtension = setupFdk({
   api_key: process.env.EXTENSION_API_KEY,
@@ -41,23 +38,17 @@ const fdkExtension = setupFdk({
   cluster: process.env.FP_API_DOMAIN,
   callbacks: {
     auth: async (req) => {
-      // Write you code here to return initial launch url after auth process complete
       if (req.query.application_id) {
         return `${req.extension.base_url}/company/${req.query["company_id"]}/application/${req.query.application_id}`;
       } else {
         return `${req.extension.base_url}/company/${req.query["company_id"]}`;
       }
     },
-
     uninstall: async (req) => {
-      // Write your code here to cleanup data related to extension
-      // If task is time taking then process it async on other process.
+      // Cleanup code here
     },
   },
-  storage: new SQLiteStorage(
-    sqliteInstance,
-    "exapmple-fynd-platform-extension"
-  ), // add your prefix
+  storage: new SQLiteStorage(sqliteInstance, "fynd-platform-extension"),
   access_mode: "offline",
   webhook_config: {
     api_path: "/api/webhook-events",
@@ -71,31 +62,33 @@ const fdkExtension = setupFdk({
   },
 });
 
+// Determine static path based on environment
 const STATIC_PATH =
   process.env.NODE_ENV === "production"
-    ? path.join(process.cwd(), "frontend", "public", "dist")
-    : path.join(process.cwd(), "frontend");
+    ? path.join(__dirname, "../frontend/dist")
+    : path.join(__dirname, "../frontend");
 
 const app = express();
+
+// Create routers
+const bundleRouter = express.Router();
+const productRouter = express.Router();
+const salesChannelRouter = express.Router();
+const companyRouter = express.Router();
+
 const platformApiRoutes = fdkExtension.platformApiRoutes;
 
-// Middleware to parse cookies with a secret key
+// Middleware
 app.use(cookieParser("ext.session"));
+app.use(bodyParser.json({ limit: "2mb" }));
 
-// Middleware to parse JSON bodies with a size limit of 2mb
-app.use(
-  bodyParser.json({
-    limit: "2mb",
-  })
-);
-
-// Serve static files from the React dist directory
+// Serve static files
 app.use(serveStatic(STATIC_PATH, { index: false }));
 
-// FDK extension handler and API routes (extension launch routes)
+// FDK extension handler
 app.use("/", fdkExtension.fdkHandler);
 
-// Route to handle webhook events and process it.
+// Webhook route
 app.post("/api/webhook-events", async function (req, res) {
   try {
     console.log(`Webhook Event: ${req.body.event} received`);
@@ -107,85 +100,72 @@ app.post("/api/webhook-events", async function (req, res) {
   }
 });
 
-// ----------------------------- PRODUCTS ------------------------------
-
-// Get products list for application
-productRouter.post("/products", async function view(req, res, next) {
+// Product routes
+productRouter.post("/products", async function (req, res, next) {
   await getProducts(req, res, next);
 });
 
-// ----------------------------- BUNDLES ------------------------------
-
-//Get applications bundles
-bundleRouter.post("/bundles", async function view(req, res, next) {
+// Bundle routes
+bundleRouter.post("/bundles", async function (req, res, next) {
   await getBundles(req, res, next);
 });
 
-// Generate bundles
-bundleRouter.post("/generate_bundles", async function view(req, res, next) {
+bundleRouter.post("/generate_bundles", async function (req, res, next) {
   await generateBundles(req, res, next);
 });
 
-//Create bundles user wants
-bundleRouter.post("/create_bundles", async function view(req, res, next) {
+bundleRouter.post("/create_bundles", async function (req, res, next) {
   await createBundles(req, res, next);
 });
 
-// Creates a title
-bundleRouter.post("/generate_name", async function view(req, res, next) {
+bundleRouter.post("/generate_name", async function (req, res, next) {
   await generateName(req, res, next);
 });
 
-// Creates an image
-bundleRouter.post("/generate_image", async function view(req, res, next) {
+bundleRouter.post("/generate_image", async function (req, res, next) {
   await generateImage(req, res, next);
 });
 
-// Update bundle
-bundleRouter.put("/update_bundle", async function view(req, res, next) {
+bundleRouter.put("/update_bundle", async function (req, res, next) {
   await updateBundle(req, res, next);
 });
 
-// generate prompt suggestions for bundle
-bundleRouter.post("/prompt_suggestions", async function view(req, res, next) {
+bundleRouter.post("/prompt_suggestions", async function (req, res, next) {
   await generatePromptSuggestions(req, res, next);
 });
 
-// ----------------------------- SALES CHANNELS ------------------------------
-
-//Sales channel route
-salesChannelRouter.get("/ids", async function view(req, res, next) {
+// Sales channel routes
+salesChannelRouter.get("/ids", async function (req, res, next) {
   await getApplicationIds(req, res, next);
 });
 
-// ----------------------------- COMPANY ------------------------------
-// Get company info
-companyRouter.post("/info", async function view(req, res, next) {
+// Company routes
+companyRouter.post("/info", async function (req, res, next) {
   await getCompanyInfo(req, res, next);
 });
 
-// companyRouter.post("/analytics", async function view(req, res, next) {
-//   await getAnalytics(req, res, next);
-// });
-
-// ----------------------------- ROUTES ------------------------------
-
-// FDK extension api route which has auth middleware and FDK client instance attached to it.
+// Register routes
 platformApiRoutes.use("/sales-channels", salesChannelRouter);
 platformApiRoutes.use("/product", productRouter);
 platformApiRoutes.use("/bundle", bundleRouter);
 platformApiRoutes.use("/company", companyRouter);
 
-// If you are adding routes outside of the /api path,
-// remember to also add a proxy rule for them in /frontend/vite.config.js
 app.use("/api", platformApiRoutes);
 
-// Serve the React app for all other routes
+// Serve React app for all other routes
 app.get("*", (req, res) => {
-  return res
-    .status(200)
-    .set("Content-Type", "text/html")
-    .send(readFileSync(path.join(STATIC_PATH, "index.html")));
+  try {
+    const indexPath = path.join(STATIC_PATH, "index.html");
+    return res
+      .status(200)
+      .set("Content-Type", "text/html")
+      .send(readFileSync(indexPath));
+  } catch (error) {
+    console.error("Error serving index.html:", error);
+    return res.status(404).send("Page not found");
+  }
 });
 
+// Export for Vercel serverless
+module.exports = app;
 module.exports.handler = serverless(app);
