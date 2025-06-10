@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  base: "/", // Optional, helps with proper routing
+  base: "./", // Optional, helps with proper routing
   plugins: [react()],
   resolve: {
     preserveSymlinks: true,
