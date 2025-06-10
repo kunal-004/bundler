@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "npm run start:dev",
+    "dev": "vercel dev",
+    "build": "npm --prefix frontend run build",
+    "start": "node api/server.js",
     "start:dev": "nodemon index.js",
     "start:prod": "NODE_ENV=production node index.js",
     "test": "jest --config jest.config.js --no-cache --detectOpenHandles --json --outputFile=./coverage/coverage.json"
@@ -27,6 +29,7 @@
     "mongoose": "^8.15.0",
     "node-fpgrowth": "^1.2.1",
     "serve-static": "^1.15.0",
+    "serverless-http": "^3.2.0",
     "sharp": "^0.34.2",
     "sqlite3": "^5.1.7"
   },

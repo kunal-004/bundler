@@ -10,6 +10,7 @@ const {
   SQLiteStorage,
 } = require("@gofynd/fdk-extension-javascript/express/storage");
 const sqliteInstance = new sqlite3.Database("session_storage.db");
+const serverless = require("serverless-http");
 const bundleRouter = express.Router();
 const productRouter = express.Router();
 const salesChannelRouter = express.Router();
@@ -187,4 +188,4 @@ app.get("*", (req, res) => {
     .send(readFileSync(path.join(STATIC_PATH, "index.html")));
 });
 
-module.exports = app;
+module.exports.handler = serverless(app);
