@@ -41,6 +41,7 @@ export default defineConfig({
   build: {
     outDir: "public/dist",
   },
+  root: ".",
   server: {
     host: "localhost",
     port: process.env.FRONTEND_PORT,
