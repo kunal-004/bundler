@@ -23,8 +23,20 @@
       "dest": "api/server.js"
     },
     {
+      "src": "/.*\\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$",
+      "dest": "frontend/dist/$0"
+    },
+    {
       "src": "/(.*)",
-      "dest": "index.html"
+      "dest": "frontend/dist/index.html"
     }
-  ]
+  ],
+  "functions": {
+    "api/server.js": {
+      "maxDuration": 30
+    }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
