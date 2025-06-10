@@ -115,9 +115,6 @@ platformApiRoutes.use("/company", companyRouter);
 
 app.use("/api", platformApiRoutes);
 
-// DO NOT SERVE STATIC FILES OR HAVE A CATCH-ALL ROUTE HERE
-// Vercel handles this with the routes in vercel.json
-
 // Export for Vercel serverless
 module.exports = app;
 module.exports.handler = serverless(app);
