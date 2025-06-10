@@ -29,12 +29,18 @@ const {
 } = require("../controller.js");
 
 // Initialize SQLite instance
-let sqliteInstance;
+let sqliteInstance = null;
+
 if (process.env.NODE_ENV !== "production") {
-  const sqlite3 = require("sqlite3").verbose();
-  sqliteInstance = new sqlite3.Database(":memory:");
+  try {
+    const sqlite3 = require("sqlite3").verbose();
+    sqliteInstance = new sqlite3.Database(":memory:");
+    console.log("SQLite initialized for local development.");
+  } catch (err) {
+    console.error("Failed to load sqlite3 in dev:", err);
+  }
 } else {
-  sqliteInstance = null; // or use an alternative
+  console.log("Skipping SQLite in production.");
 }
 
 const fdkExtension = setupFdk({
