@@ -1,10 +1,6 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const bodyParser = require("body-parser");
-const path = require("path");
-// const sqlite3 = require("sqlite3").verbose();
-const serveStatic = require("serve-static");
-const { readFileSync } = require("fs");
 const { setupFdk } = require("@gofynd/fdk-extension-javascript/express");
 const {
   SQLiteStorage,
@@ -28,21 +24,9 @@ const {
   generatePromptSuggestions,
 } = require("../controller.js");
 
-// Initialize SQLite instance
-let sqliteInstance = null;
-
-if (process.env.NODE_ENV !== "production") {
-  try {
-    const sqlite3 = require("sqlite3").verbose();
-    sqliteInstance = new sqlite3.Database(":memory:");
-    console.log("SQLite initialized for local development.");
-  } catch (err) {
-    console.error("Failed to load sqlite3 in dev:", err);
-  }
-} else {
-  console.log("Skipping SQLite in production.");
-}
-
+// In a stateless serverless environment, an in-memory database is reset on every request.
+// This is not suitable for production use where data needs to persist.
+// For simplicity in deployment, we re-initialize it here.
 const fdkExtension = setupFdk({
   api_key: process.env.EXTENSION_API_KEY,
   api_secret: process.env.EXTENSION_API_SECRET,
@@ -60,7 +44,10 @@ const fdkExtension = setupFdk({
       // Cleanup code here
     },
   },
-  storage: new SQLiteStorage(sqliteInstance, "fynd-platform-extension"),
+  storage: new SQLiteStorage(
+    new (require("sqlite3").verbose().Database)(":memory:"),
+    "fynd-platform-extension"
+  ),
   access_mode: "offline",
   webhook_config: {
     api_path: "/api/webhook-events",
@@ -74,31 +61,21 @@ const fdkExtension = setupFdk({
   },
 });
 
-// Determine static path based on environment
-const STATIC_PATH =
-  process.env.NODE_ENV === "production"
-    ? path.join(__dirname, "../frontend/dist")
-    : path.join(__dirname, "../frontend");
-
 const app = express();
+
+// Middleware
+app.use(cookieParser("ext.session"));
+app.use(bodyParser.json({ limit: "2mb" }));
+
+// FDK extension handler for authentication, etc.
+app.use("/", fdkExtension.fdkHandler);
 
 // Create routers
 const bundleRouter = express.Router();
 const productRouter = express.Router();
 const salesChannelRouter = express.Router();
 const companyRouter = express.Router();
-
 const platformApiRoutes = fdkExtension.platformApiRoutes;
-
-// Middleware
-app.use(cookieParser("ext.session"));
-app.use(bodyParser.json({ limit: "2mb" }));
-
-// Serve static files
-app.use(serveStatic(STATIC_PATH, { index: false }));
-
-// FDK extension handler
-app.use("/", fdkExtension.fdkHandler);
 
 // Webhook route
 app.post("/api/webhook-events", async function (req, res) {
@@ -113,50 +90,24 @@ app.post("/api/webhook-events", async function (req, res) {
 });
 
 // Product routes
-productRouter.post("/products", async function (req, res, next) {
-  await getProducts(req, res, next);
-});
+productRouter.post("/products", getProducts);
 
 // Bundle routes
-bundleRouter.post("/bundles", async function (req, res, next) {
-  await getBundles(req, res, next);
-});
-
-bundleRouter.post("/generate_bundles", async function (req, res, next) {
-  await generateBundles(req, res, next);
-});
-
-bundleRouter.post("/create_bundles", async function (req, res, next) {
-  await createBundles(req, res, next);
-});
-
-bundleRouter.post("/generate_name", async function (req, res, next) {
-  await generateName(req, res, next);
-});
-
-bundleRouter.post("/generate_image", async function (req, res, next) {
-  await generateImage(req, res, next);
-});
-
-bundleRouter.put("/update_bundle", async function (req, res, next) {
-  await updateBundle(req, res, next);
-});
-
-bundleRouter.post("/prompt_suggestions", async function (req, res, next) {
-  await generatePromptSuggestions(req, res, next);
-});
+bundleRouter.post("/bundles", getBundles);
+bundleRouter.post("/generate_bundles", generateBundles);
+bundleRouter.post("/create_bundles", createBundles);
+bundleRouter.post("/generate_name", generateName);
+bundleRouter.post("/generate_image", generateImage);
+bundleRouter.put("/update_bundle", updateBundle);
+bundleRouter.post("/prompt_suggestions", generatePromptSuggestions);
 
 // Sales channel routes
-salesChannelRouter.get("/ids", async function (req, res, next) {
-  await getApplicationIds(req, res, next);
-});
+salesChannelRouter.get("/ids", getApplicationIds);
 
 // Company routes
-companyRouter.post("/info", async function (req, res, next) {
-  await getCompanyInfo(req, res, next);
-});
+companyRouter.post("/info", getCompanyInfo);
 
-// Register routes
+// Register API routes
 platformApiRoutes.use("/sales-channels", salesChannelRouter);
 platformApiRoutes.use("/product", productRouter);
 platformApiRoutes.use("/bundle", bundleRouter);
@@ -164,19 +115,8 @@ platformApiRoutes.use("/company", companyRouter);
 
 app.use("/api", platformApiRoutes);
 
-// Serve React app for all other routes
-app.get("*", (req, res) => {
-  try {
-    const indexPath = path.join(STATIC_PATH, "index.html");
-    return res
-      .status(200)
-      .set("Content-Type", "text/html")
-      .send(readFileSync(indexPath));
-  } catch (error) {
-    console.error("Error serving index.html:", error);
-    return res.status(404).send("Page not found");
-  }
-});
+// DO NOT SERVE STATIC FILES OR HAVE A CATCH-ALL ROUTE HERE
+// Vercel handles this with the routes in vercel.json
 
 // Export for Vercel serverless
 module.exports = app;
