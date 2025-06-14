@@ -70,9 +70,13 @@ export const AppProvider = ({ children }) => {
   const [aiContentError, setAiContentError] = useState(null);
 
   const [companyInfo, setCompanyInfo] = useState(null);
-  // const [analyticsData, setAnalyticsData] = useState(null);
-  // const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
-  // const [analyticsError, setAnalyticsError] = useState(null);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState(null);
+
+  const [bundleOpportunities, setBundleOpportunities] = useState([]);
+  const [isLoadingOpportunities, setIsLoadingOpportunities] = useState(false);
+  const [opportunityError, setOpportunityError] = useState(null);
 
   const params = useParams();
 
@@ -125,13 +129,7 @@ export const AppProvider = ({ children }) => {
   }, [params.company_id]);
 
   const fetchProducts = useCallback(
-    async (
-      page = 1,
-      limit = 10,
-      append = false,
-      searchText = "",
-      category = ""
-    ) => {
+    async (page = 1, limit = 10, append = false, searchText = "") => {
       if (!companyId) {
         if (!append) setProducts({ items: [], page: {} });
         setProductPagination({
@@ -157,7 +155,6 @@ export const AppProvider = ({ children }) => {
         };
 
         if (searchText?.trim()) payload.searchText = searchText.trim();
-        if (category) payload.category = category;
 
         const { data } = await axios.post(apiUrl, payload, {
           headers: { "x-company-id": companyId },
@@ -205,13 +202,7 @@ export const AppProvider = ({ children }) => {
   );
 
   const fetchAllProducts = useCallback(
-    async (
-      page = 1,
-      limit = 10,
-      append = false,
-      searchText = "",
-      category = ""
-    ) => {
+    async (page = 1, limit = 10, append = false, searchText = "") => {
       if (!companyId) {
         if (!append) setAllProducts({ items: [], page: {} });
         setProductPagination({
@@ -236,7 +227,6 @@ export const AppProvider = ({ children }) => {
         };
 
         if (searchText?.trim()) payload.searchText = searchText.trim();
-        if (category) payload.category = category;
 
         const { data } = await axios.post(apiUrl, payload, {
           headers: { "x-company-id": companyId },
@@ -434,6 +424,7 @@ export const AppProvider = ({ children }) => {
     if (companyId) {
       getCompanyInfo();
       fetchSalesChannels();
+      fetchAnalytics();
     } else {
       setProducts({ items: [], page: {} });
       setAllProducts({ items: [], page: {} });
@@ -500,9 +491,9 @@ export const AppProvider = ({ children }) => {
         });
         const resultProductSet = response.data.data;
         if (!resultProductSet || Object.keys(resultProductSet).length === 0) {
-          setBundleError(
-            "AI could not generate bundles with the selected products."
-          );
+          // setBundleError(
+          //   "AI could not generate bundles with the selected products."
+          // );
           return [];
         }
         const newAiBundles = Object.entries(resultProductSet)
@@ -892,7 +883,6 @@ export const AppProvider = ({ children }) => {
           },
           withCredentials: true,
         });
-        console.log("resss", response);
         return response.data.data;
       } catch (e) {
         console.error("Failed to fetch dynamic prompts:", e);
@@ -902,36 +892,76 @@ export const AppProvider = ({ children }) => {
     [companyId]
   );
 
-  // const fetchAnalytics = useCallback(async () => {
-  //   if (!companyId) {
-  //     setAnalyticsData(null);
-  //     return;
-  //   }
-  //   setIsLoadingAnalytics(true);
-  //   setAnalyticsError(null);
-  //   try {
-  //     const apiUrl = urlJoin(EXAMPLE_MAIN_URL, "/api/company/analytics"); // Assuming this new route
-  //     const { data } = await axios.post(
-  //       apiUrl,
-  //       { company_id: companyId },
-  //       {
-  //         headers: { "x-company-id": companyId },
-  //         withCredentials: true,
-  //       }
-  //     );
-  //     if (data.success) {
-  //       setAnalyticsData(data.data);
-  //     } else {
-  //       throw new Error(data.message || "Failed to fetch analytics data.");
-  //     }
-  //   } catch (e) {
-  //     console.error("Error fetching analytics:", e);
-  //     setAnalyticsError(e.response?.data?.message || e.message);
-  //     setAnalyticsData(null);
-  //   } finally {
-  //     setIsLoadingAnalytics(false);
-  //   }
-  // }, [companyId]);
+  const fetchAnalytics = useCallback(async () => {
+    if (!companyId) {
+      setAnalyticsData(null);
+      return;
+    }
+    setIsLoadingAnalytics(true);
+    setAnalyticsError(null);
+    try {
+      const apiUrl = urlJoin(EXAMPLE_MAIN_URL, "/api/company/analytics");
+      const { data } = await axios.post(
+        apiUrl,
+        { company_id: companyId },
+        {
+          headers: { "x-company-id": companyId },
+          withCredentials: true,
+        }
+      );
+
+      if (data.success) {
+        setAnalyticsData(data.data);
+      }
+    } catch (e) {
+      console.error("Error fetching analytics:", e);
+
+      if (e.response && e.response.status === 404) {
+        setAnalyticsData([]);
+      } else {
+        setAnalyticsError(e.response?.data?.message || e.message);
+        setAnalyticsData(null);
+      }
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  }, [companyId]);
+
+  const generateBundleOpportunities = useCallback(async () => {
+    if (!companyId) {
+      setOpportunityError("Company ID is missing.");
+      return;
+    }
+    setIsLoadingOpportunities(true);
+    setOpportunityError(null);
+    try {
+      const apiUrl = urlJoin(
+        EXAMPLE_MAIN_URL,
+        "/api/bundle/generate-opportunities"
+      );
+      const response = await axios.post(
+        apiUrl,
+        { company_id: companyId },
+        {
+          headers: { "x-company-id": companyId },
+          withCredentials: true,
+        }
+      );
+      if (response.data.success) {
+        setBundleOpportunities(response.data.data);
+      } else {
+        throw new Error(response.data.message || "Failed to get suggestions.");
+      }
+    } catch (e) {
+      console.error("Error generating opportunities:", e);
+      setOpportunityError(
+        e.response?.data?.message || e.message || "An error occurred."
+      );
+      setBundleOpportunities([]);
+    } finally {
+      setIsLoadingOpportunities(false);
+    }
+  }, [companyId]);
 
   const value = {
     products,
@@ -979,10 +1009,15 @@ export const AppProvider = ({ children }) => {
 
     fetchAllProductsRecursively,
 
-    // analyticsData,
-    // isLoadingAnalytics,
-    // analyticsError,
-    // fetchAnalytics,
+    analyticsData,
+    isLoadingAnalytics,
+    analyticsError,
+    fetchAnalytics,
+
+    bundleOpportunities,
+    isLoadingOpportunities,
+    opportunityError,
+    generateBundleOpportunities,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

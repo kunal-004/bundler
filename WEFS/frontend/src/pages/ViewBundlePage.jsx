@@ -147,7 +147,6 @@ const ViewBundlePage = () => {
       logo: aiContent.logo,
       description: aiContent.description,
     }));
-    console.log("Applied AI suggestions to local bundle state:", aiContent);
     setShowAiSuggestions(false);
   };
 

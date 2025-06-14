@@ -120,7 +120,7 @@ const PromptStep = ({
                 <p className="text-sm text-slate-500">
                   {isLoadingSuggestions
                     ? "Loading..."
-                    : "No suggestions available. Please write a custom prompt."}
+                    : "No suggestions found. Try writing a custom prompt, or make sure your products have proper names."}
                 </p>
               </div>
             )}

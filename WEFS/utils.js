@@ -428,6 +428,246 @@ async function uploadBase64Image(base64String) {
   }
 }
 
+async function runPipeline(userPrompt, products, relevantKeywords) {
+  const googleApi = process.env.GEMINI_API;
+  const genAI = new GoogleGenerativeAI(googleApi);
+
+  const schemaForKeys = {
+    type: SchemaType.ARRAY,
+    description: "An array of strings",
+    items: {
+      type: SchemaType.STRING,
+    },
+  };
+
+  const keys = [
+    "category_slug",
+    "country_of_origin",
+    "tags",
+    "name",
+    "gender",
+    "description",
+    "short_description",
+    "brand",
+    "marketer-name",
+    "uid",
+  ];
+
+  const mandatoryKeys = ["name", "description", "short_description", "uid"];
+
+  //TODO: refine all prompts
+
+  const getRelatedKeysPrompt = `You are a smart assistant. You will be given a user request and a list of data-field names. Your only task is to return a pure JSON array (no commentary, no excuses) containing strictly the field names needed to fulfill the request—and nothing else. Failure to comply or any extra output will be treated as a critical error; if no fields apply, return an all keys in the array and nothing more.
+    
+    User Request: ${userPrompt}
+
+    Data-fields: ${keys.join(", ")}
+
+    `;
+
+  const keyModel = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    systemInstruction: "You are smart assistant.",
+    temperature: 1,
+    responseMimeType: "application/json",
+    responseSchema: schemaForKeys,
+  });
+
+  const resultForKeys = await keyModel.generateContent(getRelatedKeysPrompt);
+  const respForKeys = resultForKeys.response;
+  const keysInText = respForKeys.text();
+
+  const cleanedKeys = JSON.parse(
+    keysInText
+      .replace(/```json|```/g, "") // remove ```json blocks
+      .replace(/\n/g, "") // remove newlines
+      .trim()
+  );
+
+  const cleanedKeysSet = new Set([...cleanedKeys, ...mandatoryKeys]);
+
+  const cleanedProducts = products.map((product) => {
+    const filteredEntries = Object.entries(product)
+      .filter(([key]) => cleanedKeysSet.has(key))
+      .map(([key, value]) => {
+        if (
+          key === "brand" &&
+          value &&
+          typeof value === "object" &&
+          value.name
+        ) {
+          return [key, value.name];
+        } else {
+          return [key, value];
+        }
+      })
+      .filter(([_, value]) => value !== undefined);
+
+    return Object.fromEntries(filteredEntries);
+  });
+
+  const getRelatedProductsPrompt = `
+  You are a ruthless filter. You will receive a user request and a list of product objects. Your sole mission is to return a pure JSON array of UIDs (numbers only) of only those products relevant to the userPrompt—nothing else. Any deviation, extra output, or inclusion of irrelevant products is unacceptable and treated as a failure. If no products match, return an empty array.
+
+  User Request: ${userPrompt}
+
+  Products: ${JSON.stringify(cleanedProducts, null, 2)}
+  `;
+
+  const schemaForProducts = {
+    type: SchemaType.ARRAY,
+    description: "An array of numbers",
+    items: {
+      type: SchemaType.NUMBER,
+      description: "A numeric product ID",
+    },
+  };
+
+  const productModel = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    systemInstruction: "You are smart assistant.",
+    temperature: 1,
+    responseMimeType: "application/json",
+    responseSchema: schemaForProducts,
+  });
+
+  const resultForProducts = await productModel.generateContent(
+    getRelatedProductsPrompt
+  );
+  const respForProducts = resultForProducts.response;
+  const productIdsInText = respForProducts.text();
+
+  const cleanedFilteredProductIds = JSON.parse(
+    productIdsInText
+      .replace(/```json|```/g, "") // remove ```json blocks
+      .replace(/\n/g, "") // remove newlines
+      .trim()
+  );
+
+  const usableProducts = products.filter((product) => {
+    if (cleanedFilteredProductIds.includes(product.uid)) {
+      return product;
+    }
+  });
+
+  const schemaForBundleCreation = {
+    type: SchemaType.ARRAY,
+    description:
+      "An array of arrays, where each inner array contains numeric product IDs",
+    items: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.NUMBER,
+        description: "A numeric product ID",
+      },
+    },
+  };
+
+  // const relevantKeywords = [
+  //   ["keyboard", "mouse"],
+  //   ["laptop", "mobile phone"],
+  // ];
+
+  const createBundlePrompt = `
+      You will receive exactly two inputs:
+
+        Products and their data (JSON array):
+        ${JSON.stringify(usableProducts, null, 2)}
+
+        User Prompt (string):
+        "${userPrompt}"
+
+        Any deviation from the rules below is intolerable. You must produce only a JSON array of arrays of UIDs. No commentary. No errors. No excuses.
+
+        Read all the given products
+
+        1. Correlation Criteria — No Shortcuts
+        a. Analyze every product’s data — no skipping.
+        b. Use the following signals as **reference indicators** to decide if products are related or go well together. These are **guidance signals**, not hard requirements:
+
+        Products share identical or complementary category_slug (e.g., “phone” + “phone case”).
+
+        Products are clearly designed to function together (e.g., “camera” + “tripod”).
+
+        Products target the same gender audience (e.g., “Men’s shirt” + “Men’s shoes”).
+
+        Products share overlapping tags, marketing labels, or branding signals.
+
+        Products exhibit documented co‑purchase behavior (“people also buy X with Y”).
+
+        Hard Constraint:
+        Do not create a bundle based only on keyword overlap, category match, or product similarity. This includes products that share generic terms like “watch,” “shirt,” “bag,” etc.
+        Bundles must only include products that are explicitly and strongly relevant to the user's prompt.
+        If the user prompt does not logically suggest that certain similar products should be grouped, you must skip them—even if their data looks related.
+
+        Relevance > Similarity. Matching keywords ≠ matching user intent.
+
+        Do not bundle unrelated products. Do not create bundles just to maximize count—maximize only valid bundles. All bundles must make practical, useful sense from a real user's perspective. If a product does not belong in any meaningful bundle, exclude it entirely. Follow all format and filtering rules without exception.
+
+        If you bundle similar products that do not clearly align with the user’s specific prompt, it is considered a failure.
+
+        2. Group‑Building — Absolute Rules
+        a. Begin with the first product and exhaustively test all others for valid pairing.
+        b. Construct each bundle as an array of UIDs.
+        c. Maximum bundle size: 5 items.
+        d. If two bundles can merge into a larger valid set (e.g., [ID1,ID2] + [ID2,ID3] → [ID1,ID2,ID3]), discard the smaller ones. Only the largest, most complete bundle stands.
+        e. No single‑item bundles. Omit them.
+        f. No duplicate bundles. Skip any bundle whose UID set exactly matches one already created.
+        g. No repeated UIDs within any bundle (e.g., [keyboard,keyboard] is forbidden).
+        h. Maximize the number of valid bundles without breaking any rule above.
+        i. Keyword multiplicity combinations: If a bundle’s defining keywords match multiple distinct products (e.g., two different “wireless mouse” items), generate all possible unique combinations of those products within the bundle constraints.
+
+        3. User Intent — Non‑Negotiable Overrides
+        If the user prompt specifies additional constraints (e.g., “group by color,” “limit to 3 items”), obey them exactly—no exceptions.
+
+        If the prompt is empty or vague, revert to steps 1–2 only. Do not invent extra logic.
+
+        4. Keyword Bundles — Mandatory Secondary Task
+        You will also receive an array of keyword groups, for example:
+
+        Keywords : ${JSON.stringify(relevantKeywords, null, 2)}
+
+        [["keyboard","mouse"], ["laptop","mobile phone"]]
+        For each keyword group relevant to the user prompt, form new, separate bundles from matching products.
+
+        Do not merge these keyword‑driven bundles into existing ones.
+
+        No duplicates: if a bundle’s UID set already exists (from any source), skip it.
+
+        5. Output — Enforce to the Letter
+        Return nothing but a pure JSON array of UID‑arrays.
+
+        Zero extra text.
+
+        Zero explanation.
+
+        Zero error messages.
+    `;
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    systemInstruction: "You are a product categorization AI.",
+    temperature: 0.5,
+    responseMimeType: "application/json",
+    responseSchema: schemaForBundleCreation,
+  });
+
+  const resultForBundleCreation = await model.generateContent(
+    createBundlePrompt
+  );
+  const respForBundleCreation = resultForBundleCreation.response;
+  const textForBundleCreation = respForBundleCreation.text();
+
+  const cleanedProductIds = JSON.parse(
+    textForBundleCreation
+      .replace(/```json|```/g, "") // remove ```json blocks
+      .replace(/\n/g, "") // remove newlines
+      .trim()
+  );
+
+  return cleanedProductIds;
+}
+
 module.exports = {
   connectToDb,
   disconnectDB,
@@ -437,4 +677,5 @@ module.exports = {
   generateImageUsingGemini,
   isApplicationId,
   uploadBase64Image,
+  runPipeline,
 };

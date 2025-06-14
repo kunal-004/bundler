@@ -53,8 +53,6 @@ const BundleList = ({
     );
   }
 
-  console.log("Bundles:", bundles);
-
   if (!bundles || bundles.length === 0) {
     return (
       <div className="text-center py-20 bg-gradient-to-br from-gray-50 via-white to-blue-50 rounded-2xl shadow-sm border border-gray-200">

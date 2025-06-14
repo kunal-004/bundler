@@ -303,14 +303,17 @@ const CreateBundlePage = () => {
         setAiSuggestedBundles(generatedBundlesSuggestions);
         setCurrentStep(3);
         toast.success("Bundle suggestions generated successfully!");
-      } else if (!bundleError) {
+      } else {
         toast.error(
-          "AI could not generate any bundle suggestions. Please try with different products or refine your prompt."
+          "The AI could not find any matching bundles. Please try a different prompt or select more products."
         );
       }
     } catch (error) {
       console.error("Error during AI bundle generation:", error);
-      toast.error("An error occurred during AI bundle generation.");
+      toast.error(
+        error.response?.data?.message ||
+          "An error occurred during AI bundle generation."
+      );
     }
   };
 
@@ -582,11 +585,11 @@ const CreateBundlePage = () => {
           {renderStepIndicator()}
           {renderContent()}
         </div>
-        {bundleError && (
+        {/* {bundleError && (
           <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm shadow">
             <strong>Error:</strong> {bundleError}
           </div>
-        )}
+        )} */}
       </div>
     </div>
   );

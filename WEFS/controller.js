@@ -1,12 +1,12 @@
 const { freqCartModel } = require("./models/FreqCart");
-const { cartWarehouseModel } = require("./models/CartWarehouse");
 const {
-  getKeywordsUsingAI,
-  enrichProductsWithKeywords,
   generateImageUsingGemini,
   uploadBase64Image,
+  runPipeline,
 } = require("./utils");
-const { GoogleGenerativeAI, SchemaType } = require("@google/generative-ai");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { bundleWarehouseModel } = require("./models/bundleWarehouse");
+const { default: axios } = require("axios");
 
 async function getProducts(req, res, next) {
   try {
@@ -17,7 +17,6 @@ async function getProducts(req, res, next) {
       pageNo,
       pageSize,
       searchText,
-      category,
     } = req.body;
 
     if (!companyId) {
@@ -36,7 +35,6 @@ async function getProducts(req, res, next) {
 
     const basePlatformOptions = {
       companyId: companyId,
-      ...(category && { categoryIds: [category] }),
     };
 
     if (searchText) {
@@ -289,7 +287,6 @@ async function getBundles(req, res, next) {
   }
 }
 
-//TODO: Update and test this
 async function generateBundles(req, res, next) {
   try {
     const { platformClient } = req;
@@ -306,118 +303,29 @@ async function generateBundles(req, res, next) {
       pageSize: productIds.length,
     });
 
-    const productsData = [];
-
-    for (const product of response.items) {
-      productsData.push({
-        name: product.name,
-        description: product.description,
-        id: product.uid,
-      });
-    }
-
-    // Get processed data from mongodb
     const processedData = await freqCartModel
       .find()
       .sort({ createdAt: -1 })
       .limit(1)
       .lean();
 
-    // const productsDataWithKeywords = await enrichProductsWithKeywords(
-    //   productsData
-    // );
-
-    // Send the processed data and productsData to gemini with a prompt to take processed data as a pattern and use products to create a an array of arrays with each array being productId of the product
-
-    const googleApi = process.env.GEMINI_API;
-    const genAI = new GoogleGenerativeAI(googleApi);
-    const schema = {
-      type: SchemaType.ARRAY,
-      description:
-        "An array of arrays, where each inner array contains numeric product IDs",
-      items: {
-        type: SchemaType.ARRAY,
-        items: {
-          type: SchemaType.NUMBER,
-          description: "A numeric product ID",
-        },
-      },
-    };
-
-    const prompt2 = `
-          Products:
-          ${JSON.stringify(productsData, null, 2)}
-
-          User Prompt:
-          "${userPrompt}"
-
-          Follow these rules in sequence:
-
-          1. **Identify correlation criteria →**
-            a. Look at each product’s **name**, **description**, and any metadata (tags, category, price range).
-            b. Two products “go together” if they share one or more strong signals:
-                - Same category or complementary categories (e.g. “phone” + “phone case”)
-                - Shared keywords in name/description (e.g. “leather” + “leather”)
-                - Designed to be used together (e.g. “camera” + “tripod”)
-                - From similar categories (e.g. "scarf" + "dress") clothes category
-
-          2. **Build groups**
-            a. Starting from the first product, find all other products that match at least one correlation criterion.
-            b. Form a subarray of their **ids**.
-            c. Make multiple bundles of size two and three. 
-            d. **Only** include groups of size ≥ 2. Singletons should be omitted.
-
-          3. **Respect the user’s intent**
-            - If the userPrompt contains extra instructions (e.g. “only group by color” or “limit to size 3”), honor those constraints in your grouping logic.
-            - If userPrompt is empty or general, use the default criteria in step 1.
-
-            4. **Output format**
-          - Return **only** a JSON array of arrays of IDs,
-          - Do not send any text, conversations.
-    `;
-
-    // 5. **Output format**
-    //   - Return **only** a JSON array of these ID‑arrays.
-    //   - Do **not** include any extraneous text, code, or explanation.
-
-    // const resp = await ai.models.generateContent({
-    //   model: "gemini-1.5-flash",
-    //   contents: prompt,
-    //   config: {
-    //     systemInstruction: "You are a data‐processing assistant.",
-    //     temperature: 0,
-    //   },
-    // });
-
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      systemInstruction: "You are a product categorization AI.",
-      // generationConfig: {
-      temperature: 0,
-      responseMimeType: "application/json",
-      responseSchema: schema,
-      // },
-    });
-    const result = await model.generateContent(prompt2);
-    const resp = result.response;
-    const text = resp.text();
-    // const cleanedProductIds = text
-    //   .replace(/```json|```/g, "") // remove ```json blocks
-    //   .replace(/\n/g, "") // remove newlines
-    //   .trim();
-
-    const cleanedProductIds = JSON.parse(
-      text
-        .replace(/```json|```/g, "") // remove ```json blocks
-        .replace(/\n/g, "") // remove newlines
-        .trim()
+    const cleanedProductIds = await runPipeline(
+      userPrompt,
+      response.items,
+      processedData
     );
 
     const frequentProductIds = cleanedProductIds.flatMap((prod) => prod);
 
-    //TODO: If bundles already exists do not send it
+    if (frequentProductIds.length === 0) {
+      return res.json({
+        success: true,
+        message:
+          "No relevant products found to create bundles based on the prompt.",
+        data: {},
+      });
+    }
 
-    // Get the data of products and send it to frontend
     const dataOfFrequentProducts = await platformClient.catalog.getProducts({
       companyId: company_id,
       pageType: "number",
@@ -441,58 +349,9 @@ async function generateBundles(req, res, next) {
       }
     }
 
-    return res.json({ data: resultProductSet });
+    return res.json({ success: true, data: resultProductSet });
   } catch (err) {
     next(err);
-  }
-}
-
-async function saveOrderToDb(
-  event_name,
-  request_body,
-  company_id,
-  application_id
-) {
-  try {
-    // Clean the data(Get keywords) using data/ai and then save it to mongodb
-
-    // request_body.payload.order.shipments[].bags[].item.name
-    // request_body.payload.order.shipments[].bags[].item.id
-    // request_body.payload.order.shipments[].bags[].item.images[]
-
-    //Using just name of product for extracting keywords later will use images also
-
-    let keywords = [];
-    const cart = [];
-
-    for (const shipment of request_body.payload.order.shipments) {
-      for (const bag of shipment.bags) {
-        const result = await getKeywordsUsingAI([bag.item.name]);
-
-        if (result.length !== 0) {
-          keywords.push(result);
-          cart.push({
-            name: bag.item.name,
-            imageUrls: bag.item.images,
-            itemId: bag.item.id,
-          });
-        }
-      }
-    }
-    keywords = keywords.flatMap((keyword) => keyword);
-
-    keywords = [...new Set(keywords)];
-
-    if (keywords.length > 1) {
-      const savedCart = await cartWarehouseModel.create({
-        cart,
-        keywords,
-        companyId: company_id,
-        applicationId: application_id,
-      });
-    }
-  } catch (err) {
-    console.log(err);
   }
 }
 
@@ -557,26 +416,26 @@ async function createBundles(req, res, next) {
       });
 
       let names = [];
-      let imageUrls = [];
-      let imagesContext = "";
-      let prevImgNo = 1;
+      // let imageUrls = [];
+      // let imagesContext = "";
+      // let prevImgNo = 1;
       for (const product of response.items || []) {
-        const images = product.images || [];
-        const imagesToUse = images.slice(0, 3).map((ele) => ele.url);
+        // const images = product.images || [];
+        // const imagesToUse = images.slice(0, 3).map((ele) => ele.url);
 
-        if (imagesToUse.length > 0) {
-          const start = prevImgNo;
-          const end = prevImgNo + imagesToUse.length - 1;
+        // if (imagesToUse.length > 0) {
+        //   const start = prevImgNo;
+        //   const end = prevImgNo + imagesToUse.length - 1;
 
-          if (start === end) {
-            imagesContext += `Image ${start}: ${product.name}\n`;
-          } else {
-            imagesContext += `Images ${start}–${end}: ${product.name}\n`;
-          }
-          prevImgNo = end + 1;
-        }
+        //   if (start === end) {
+        //     imagesContext += `Image ${start}: ${product.name}\n`;
+        //   } else {
+        //     imagesContext += `Images ${start}–${end}: ${product.name}\n`;
+        //   }
+        //   prevImgNo = end + 1;
+        // }
 
-        imageUrls.push(...imagesToUse);
+        // imageUrls.push(...imagesToUse);
         names.push({
           name: product.name,
           description: product.description,
@@ -600,20 +459,25 @@ async function createBundles(req, res, next) {
         .replace(/\n/g, "") // remove newlines
         .trim();
 
-      const bundleSlug = bundleName
-        .toLowerCase()
-        .replace(/\s+/g, "-")
-        .replace(/[^a-z0-9-]/g, "");
+      const bundleSlug =
+        bundleName
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/[^a-z0-9-]/g, "") +
+        "-" +
+        Array.from({ length: 4 }, () =>
+          String.fromCharCode(97 + Math.floor(Math.random() * 26))
+        ).join("");
 
-      const imageResp = await generateImageUsingGemini(
-        imageUrls,
-        imagesContext,
-        additionalPrompt
-      );
+      // const imageResp = await generateImageUsingGemini(
+      //   imageUrls,
+      //   imagesContext,
+      //   additionalPrompt
+      // );
 
-      if (!imageResp.success) {
-        return res.status(400).json(imageResp);
-      }
+      // if (!imageResp.success) {
+      //   return res.status(400).json(imageResp);
+      // }
 
       for (let i = 0; i < bundle.length; i++) {
         productsForBundle.push({
@@ -623,10 +487,11 @@ async function createBundles(req, res, next) {
         });
       }
 
-      const logo = await uploadBase64Image(
-        `data:image/png;base64,${imageResp.data.toString("base64")}`
-      );
+      // const logo = await uploadBase64Image(
+      //   `data:image/png;base64,${imageResp.data.toString("base64")}`
+      // );
 
+      // TODO: Add more data by refering the docs page
       const dataForBundle = {
         companyId: company_id,
         body: {
@@ -635,7 +500,8 @@ async function createBundles(req, res, next) {
           name: bundleName,
           products: productsForBundle,
           slug: bundleSlug,
-          logo: logo,
+          // logo: logo,
+          page_visibility: ["pdp"],
         },
       };
 
@@ -645,6 +511,20 @@ async function createBundles(req, res, next) {
       try {
         isBundleCreated = await platformClient.catalog.createProductBundle(
           dataForBundle
+        );
+
+        await bundleWarehouseModel.updateOne(
+          { companyId: company_id },
+          {
+            $push: {
+              bundle: {
+                bundleId: isBundleCreated._id,
+                boughtCount: 0,
+                aiGen: true,
+              },
+            },
+          },
+          { upsert: true }
         );
       } catch (error) {
         if (!isBundleCreated) {
@@ -666,7 +546,7 @@ async function createBundles(req, res, next) {
 
       const response = {
         success: true,
-        message: `Bundles created successfully except : ${failedNames} /n Reason : ${reason}`,
+        message: `Bundles created successfully except : ${failedNames}`,
       };
 
       return res.status(200).json(response);
@@ -674,10 +554,10 @@ async function createBundles(req, res, next) {
   } catch (error) {
     const response = {
       success: false,
-      message: err.message,
+      message: error.message || "An unexpected error occurred",
     };
-
-    return res.status(err.status_code).json(response);
+    const statusCode = error.status_code || 500;
+    return res.status(statusCode).json(response);
   }
 }
 
@@ -1019,8 +899,7 @@ async function generatePromptSuggestions(req, res, next) {
 
     const products = productDetailsResponse.items.map((p) => ({
       name: p.name,
-      category: p.category_slug,
-      description: p.short_description || "",
+      category: p.category_slug || p.category || "Uncategorized",
     }));
 
     const googleApi = process.env.GEMINI_API;
@@ -1032,19 +911,33 @@ async function generatePromptSuggestions(req, res, next) {
         responseMimeType: "application/json",
       },
     });
-
     const prompt = `
-      Based on the following list of selected products:
-      ${JSON.stringify(products, null, 2)}
+You are a creative marketing assistant for an e-commerce platform. Your goal is to generate short, catchy, and clickable prompts for creating product bundles.
 
-      Please generate 4 diverse and creative prompt suggestions for a user who wants to create a product bundle.
-      The prompts should be short, easy to understand, and ready for a user to click on.
+Analyze the list of products provided below. Based on the products, generate 4 distinct and compelling bundle suggestions.
 
-      Your entire output must be a single, valid JSON array of strings.
-      Do not add any text before or after the JSON array.
+**CRITICAL RULES:**
+1.  **Be Concise:** Each prompt must be short and punchy, ideally between 4 and 8 words.
+2.  **Be Action-Oriented:** The prompts should inspire a user to create a bundle based on a theme, style, or occasion.
+3.  **Focus on Themes:** Do not just list the product names. Find a common theme (e.g., "Morning Routine," "Workout Essentials," "Summer Style").
+4.  **JSON Array Only:** Your entire output must be a single, valid JSON array containing exactly 4 strings. Do not add any introductory text, explanations, or markdown formatting like \`\`\`json.
 
-      Example output: ["Create a complete summer look.", "Suggest accessories for these items.", "Build a professional office outfit."]
-    `;
+**INPUT PRODUCTS:**
+[
+  { "name": "Men's Running Shorts", " },
+  { "name": "Breathable Athletic T-Shirt", "category": "Apparel" },
+  { "name": "Hydration Running Vest", "category": "Accessories" }
+]
+
+**YOUR OUTPUT:**
+[
+  "Create a 'Ready to Run' kit",
+  "Build the ultimate marathon pack",
+  "Design a high-performance running set",
+  "Bundle your 'Workout Warrior' gear"
+]
+
+${JSON.stringify(products, null, 2)}`;
 
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
@@ -1052,205 +945,457 @@ async function generatePromptSuggestions(req, res, next) {
 
     res.status(200).json({
       success: true,
-      message: "Successfully generated prompt suggestions.",
+      message: "Successfully handled prompt suggestions.",
       data: suggestions,
     });
   } catch (err) {
     console.error("Error generating prompt suggestions:", err);
-    res.status(200).json({
+    res.status(500).json({
       success: false,
-      message: "Failed to generate dynamic prompts, using static fallback.",
+      message: "Failed to generate dynamic prompts due to an internal error.",
       data: [],
     });
   }
 }
 
-// async function getAnalytics(req, res, next) {
-//   try {
-//     const { platformClient } = req;
-//     const { company_id: companyId } = req.body;
+async function getAnalytics(req, res, next) {
+  try {
+    const { platformClient } = req;
+    const { company_id: companyId } = req.body;
 
-//     if (!companyId) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "company_id is a required field",
-//       });
-//     }
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "company_id is a required field",
+      });
+    }
 
-//     const [ordersResponse, bundlesResponse] = await Promise.all([
-//       platformClient.order.getOrders({ companyId: companyId, pageSize: 1000 }),
-//    // Fetch recent orders
-//       platformClient.catalog.getProductBundle({
-//         companyId: companyId,
-//         pageSize: 1000,
-//       }), // Fetch all  bundles
-//     ]);
+    const analysisData = await bundleWarehouseModel
+      .find({ companyId, "bundle.aiGen": true })
+      .lean();
 
-//     const orders = ordersResponse.items || [];
-//     const definedBundles = bundlesResponse.items || [];
+    if (!analysisData || analysisData.length === 0) {
+      return res.status(204).json({
+        success: true,
+        message: "No bundles found",
+        data: [],
+      });
+    }
 
-//     const bundleIds = new Set(definedBundles.map((b) => b.id));
-//     const bundleDataMap = new Map(definedBundles.map((b) => [b.id, b]));
+    const bundleIds = analysisData[0].bundle.map((bundleData) => {
+      return bundleData.bundleId;
+    });
 
-//     let summaryStats = {
-//       revenueFromBundles: 0,
-//       bundlesSoldCount: 0,
-//       profitLift: 0,
-//       totalRevenue: 0,
-//       ordersWithBundlesCount: 0,
-//       ordersWithoutBundlesCount: 1,
-//       totalValueOrdersWithBundles: 0,
-//       totalValueOrdersWithoutBundles: 0,
-//       itemsInOrdersWithBundles: 0,
-//       itemsInOrdersWithoutBundles: 0,
-//       avgOrderValueWithBundles: 0,
-//       avgOrderValueWithoutBundles: 0,
-//       itemsPerOrderWithBundles: 0,
-//     };
-//     let topPerformingBundles = {};
-//     const coPurchaseMap = new Map();
+    const bundles = await platformClient.catalog.getProductBundle({
+      companyId,
+      page_size: 100,
+    });
 
-//     for (const order of orders) {
-//       let orderContainsBundle = false;
+    const usableBundles = bundles.items.filter((bundle) => {
+      return bundleIds.includes(bundle.id) && bundle.is_active;
+    });
 
-//
-//       let orderValue = order.amount || 0;
-//       summaryStats.totalRevenue += orderValue;
+    const dataToBeSent = usableBundles
+      .map((bundle) => {
+        const matchingBundleData = analysisData[0].bundle.find(
+          (bundleData) => bundleData.bundleId === bundle.id
+        );
 
-//       const productItems = order.shipments.flatMap((s) =>
-//         s.bags.map((b) => b.item)
-//       );
+        if (matchingBundleData) {
+          return {
+            bundle,
+            boughtCount: matchingBundleData.boughtCount,
+          };
+        }
 
-//       for (const item of productItems) {
-//         const itemId = item.article?.id || item.item_id;
+        return null;
+      })
+      .filter(Boolean);
 
-//         if (itemId && bundleIds.has(itemId)) {
-//           orderContainsBundle = true;
-//           const bundleDefinition = bundleDataMap.get(itemId);
+    return res.status(200).json({
+      success: true,
+      message: "Bundles data",
+      data: dataToBeSent,
+    });
+  } catch (err) {
+    console.error("Error in getAnalytics:", err);
+    return res.status(err.status_code || 500).json({
+      success: false,
+      message: err.message || "An error occurred while fetching analytics",
+      data: [],
+    });
+  }
+}
 
-//           const itemPrice = item.price?.total || 0;
-//           const itemQuantity = item.quantity || 1;
-//           summaryStats.revenueFromBundles += itemPrice;
-//           summaryStats.bundlesSoldCount += itemQuantity;
+async function generateBundleOpportunities(req, res, next) {
+  try {
+    const { platformClient } = req;
+    const { company_id, search_region = "IN", max_bundles = 3 } = req.body;
 
-//           if (bundleDefinition && bundleDefinition.products) {
-//             const individualPriceSum = bundleDefinition.products.reduce(
-//               (sum, p) => {
-//                 const price =
-//                   p.product_details?.price?.effective?.max ||
-//                   p.product_details?.price?.effective?.min ||
-//                   0;
-//                 return sum + price;
-//               },
-//               0
-//             );
+    const serperApiKey = process.env.SERPER_API_KEY;
+    if (!serperApiKey) {
+      return res.status(500).json({
+        success: false,
+        message: "Serper API key not configured",
+      });
+    }
 
-//             const lift = itemPrice - individualPriceSum;
-//             summaryStats.profitLift += lift > 0 ? lift : 0; // Only count positive lift
-//           }
+    if (!company_id) {
+      return res.status(400).json({
+        success: false,
+        message: "company_id is required",
+      });
+    }
 
-//           if (!topPerformingBundles[itemId]) {
-//             topPerformingBundles[itemId] = {
-//               id: itemId,
-//               name: item.name,
-//               unitsSold: 0,
-//               revenue: 0,
-//             };
-//           }
-//           topPerformingBundles[itemId].unitsSold += itemQuantity;
-//           topPerformingBundles[itemId].revenue += itemPrice;
-//         }
-//       }
+    if (!process.env.GEMINI_API) {
+      return res.status(500).json({
+        success: false,
+        message: "Gemini API key not configured",
+      });
+    }
 
-//       if (orderContainsBundle) {
-//         summaryStats.ordersWithBundlesCount++;
-//         summaryStats.totalValueOrdersWithBundles += orderValue;
-//         summaryStats.itemsInOrdersWithBundles += productItems.length;
-//       } else {
-//         summaryStats.ordersWithoutBundlesCount++;
-//         summaryStats.totalValueOrdersWithoutBundles += orderValue;
-//         summaryStats.itemsInOrdersWithoutBundles += productItems.length;
+    let allProducts = [];
+    let currentPage = 1;
+    let hasMore = true;
+    let retryCount = 0;
+    const maxRetries = 3;
 
-//         if (productItems.length >= 2) {
-//           const sortedItems = productItems.sort(
-//             (a, b) =>
-//               (a.article?.id || a.item_id) - (b.article?.id || b.item_id)
-//           );
-//           for (let i = 0; i < sortedItems.length; i++) {
-//             for (let j = i + 1; j < sortedItems.length; j++) {
-//               const pairKey = `${sortedItems[i].article.id}--+--${sortedItems[j].article.id}`;
-//               const currentPair = coPurchaseMap.get(pairKey) || {
-//                 count: 0,
-//                 names: [sortedItems[i].name, sortedItems[j].name],
-//               };
-//               coPurchaseMap.set(pairKey, {
-//                 ...currentPair,
-//                 count: currentPair.count + 1,
-//               });
-//             }
-//           }
-//         }
-//       }
-//     }
+    while (hasMore && retryCount < maxRetries) {
+      try {
+        const productResponse = await platformClient.catalog.getProducts({
+          companyId: company_id,
+          pageNo: currentPage,
+          pageSize: 100,
+        });
 
-//     if (summaryStats.ordersWithBundlesCount > 0) {
-//       summaryStats.avgOrderValueWithBundles =
-//         summaryStats.totalValueOrdersWithBundles /
-//         summaryStats.ordersWithBundlesCount;
-//       summaryStats.itemsPerOrderWithBundles =
-//         summaryStats.itemsInOrdersWithBundles /
-//         summaryStats.ordersWithBundlesCount;
-//     }
-//     if (summaryStats.ordersWithoutBundlesCount > 0) {
-//       summaryStats.avgOrderValueWithoutBundles =
-//         summaryStats.totalValueOrdersWithoutBundles /
-//         summaryStats.ordersWithoutBundlesCount;
-//     }
+        if (productResponse?.items?.length > 0) {
+          allProducts.push(...productResponse.items);
+          hasMore = productResponse.page?.has_next || false;
+          currentPage++;
+          retryCount = 0;
+        } else {
+          hasMore = false;
+        }
+      } catch (productError) {
+        retryCount++;
+        console.warn(
+          `Product fetch attempt ${retryCount} failed:`,
+          productError.message
+        );
 
-//     const topBundlesList = Object.values(topPerformingBundles)
-//       .sort((a, b) => b.revenue - a.revenue)
-//       .slice(0, 5);
+        if (retryCount >= maxRetries) {
+          throw new Error(
+            `Failed to fetch products after ${maxRetries} attempts: ${productError.message}`
+          );
+        }
 
-//     const untappedOpportunities = Array.from(coPurchaseMap.entries())
-//       .filter(([, val]) => val.count > 1) // Only show pairs bought more than once
-//       .sort(([, a], [, b]) => b.count - a.count)
-//       .slice(0, 5)
-//       .map(([, val]) => ({
-//         pair: val.names.map((name) => ({ productName: name })),
-//         coPurchaseFrequency: val.count,
-//       }));
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.pow(2, retryCount) * 1000)
+        );
+      }
+    }
 
-//     const analyticsResponse = {
-//       summaryStats,
-//       topPerformingBundles: topBundlesList,
-//       untappedOpportunities,
-//     };
+    if (allProducts.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No products found for this company.",
+      });
+    }
 
-//     return res.status(200).json({
-//       success: true,
-//       message: "Analytics data fetched successfully",
-//       data: analyticsResponse,
-//     });
-//   } catch (err) {
-//     console.error("Error in getAnalytics:", err);
-//     return res.status(err.status_code || 500).json({
-//       success: false,
-//       message: err.message || "An error occurred while fetching analytics",
-//     });
-//   }
-// }
+    const productCategories = [
+      ...new Set(
+        allProducts
+          .map((p) => p.category_slug || p.category)
+          .filter(Boolean)
+          .filter((cat) => typeof cat === "string" && cat.trim().length > 0)
+      ),
+    ];
+
+    if (productCategories.length === 0) {
+      console.warn("No valid categories found, using generic search");
+    }
+
+    let trendData = "";
+
+    try {
+      const currentYear = new Date().getFullYear();
+      const searchQueries = [
+        `e-commerce bundle trends ${currentYear}`,
+        `product bundling strategies ${currentYear} retail`,
+        productCategories.length > 0
+          ? `${productCategories
+              .slice(0, 2)
+              .join(" ")} product bundles trending`
+          : "retail bundle opportunities 2025",
+      ];
+
+      let allTrends = [];
+
+      for (const query of searchQueries) {
+        try {
+          const searchConfig = {
+            method: "post",
+            url: "https://google.serper.dev/search",
+            headers: {
+              "X-API-KEY": serperApiKey,
+              "Content-Type": "application/json",
+            },
+            data: JSON.stringify({
+              q: query,
+              num: 5,
+              gl: search_region || "us",
+            }),
+            timeout: 8000,
+          };
+
+          const response = await axios.request(searchConfig);
+          const searchData = response.data;
+
+          if (searchData.organic && searchData.organic.length > 0) {
+            const organicTrends = searchData.organic
+              .slice(0, 3)
+              .map((result) => result.snippet)
+              .filter(Boolean)
+              .join(" ");
+
+            if (organicTrends) {
+              allTrends.push(
+                `Search insights for "${query}": ${organicTrends}`
+              );
+            }
+          }
+
+          if (searchData.peopleAlsoAsk && searchData.peopleAlsoAsk.length > 0) {
+            const askTrends = searchData.peopleAlsoAsk
+              .slice(0, 2)
+              .map((ask) => `${ask.question}: ${ask.snippet}`)
+              .filter(Boolean);
+
+            allTrends.push(...askTrends);
+          }
+
+          if (
+            searchData.relatedSearches &&
+            searchData.relatedSearches.length > 0
+          ) {
+            const relatedTrends = searchData.relatedSearches
+              .slice(0, 3)
+              .map((related) => `Trending: ${related.query}`)
+              .filter(Boolean);
+
+            allTrends.push(...relatedTrends);
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch (queryError) {
+          console.warn(
+            `Serper search query failed: ${query}`,
+            queryError.message
+          );
+          continue;
+        }
+      }
+
+      if (allTrends.length > 0) {
+        trendData = allTrends
+          .join("\n- ")
+          .replace(/\s+/g, " ")
+          .substring(0, 3000);
+      } else {
+        throw new Error("No search results found from Serper");
+      }
+    } catch (searchError) {
+      console.warn(
+        "Serper search failed, using fallback trends:",
+        searchError.message
+      );
+      trendData = `
+        - Sustainability Focus: Eco-friendly and sustainable product bundles are increasingly popular as consumers prioritize environmental responsibility.
+        - Convenience Bundles: Ready-to-use product combinations that solve specific problems or complete tasks efficiently.
+        - Personalization: Customizable bundles that allow customers to choose variations or add-ons based on their preferences.
+        - Cross-Category Innovation: Unexpected product combinations that create new use cases and experiences.
+        - Value Perception: Bundles that offer clear cost savings and perceived value compared to individual purchases.
+        - Seasonal and Event-Based: Time-sensitive bundles tied to holidays, seasons, or trending events in ${new Date().getFullYear()}.
+        - Health & Wellness: Self-care and wellness product combinations are driving higher engagement.
+        - Work-from-Home: Remote work essentials bundled for productivity and comfort.
+      `;
+    }
+
+    const validProducts = allProducts.filter(
+      (p) =>
+        p.uid &&
+        p.name &&
+        typeof p.name === "string" &&
+        p.name.trim().length > 0
+    );
+
+    if (validProducts.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Insufficient valid products to create bundles (minimum 2 required).",
+      });
+    }
+
+    const productInfoForPrompt = validProducts.map((p) => ({
+      uid: p.uid,
+      name: (p.name || "").trim(),
+      category: p.category_slug || p.category || "uncategorized",
+      short_description: (p.short_description || "").trim(),
+      price: p.price || null,
+      availability: p.availability || "unknown",
+    }));
+
+    let suggestions = [];
+    try {
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API);
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash",
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+        },
+      });
+
+      const prompt = `
+        You are an expert e-commerce strategist analyzing product bundling opportunities.
+
+        CURRENT MARKET TRENDS:
+        ${trendData}
+
+        AVAILABLE PRODUCTS:
+        ${JSON.stringify(productInfoForPrompt, null, 2)}
+
+        INSTRUCTIONS:
+        1. Generate exactly ${Math.min(
+          max_bundles,
+          5
+        )} unique bundle opportunities
+        2. Each bundle must include 2-4 products from the available list
+        3. Ensure product UIDs exist in the provided list
+        4. Focus on complementary products that create value together
+        5. Consider the market trends when creating rationales
+
+        OUTPUT FORMAT (valid JSON only):
+        [
+          {
+            "bundleName": "Descriptive bundle name (max 50 characters)",
+            "rationale": "Clear explanation of why this bundle is valuable based on trends and product synergy (max 200 characters)",
+            "product_uids": [array of 2-4 product UIDs from the list],
+            "estimated_appeal": "high|medium|low",
+            "target_demographic": "Brief description of target customer"
+          }
+        ]
+
+        Respond with only the JSON array, no other text.
+      `;
+
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text();
+
+      const cleanedText = responseText.replace(/```json\n?|\n?```/g, "").trim();
+
+      suggestions = JSON.parse(cleanedText);
+    } catch (aiError) {
+      if (aiError instanceof SyntaxError) {
+        console.error("AI returned invalid JSON:", aiError.message);
+        throw new Error("AI service returned invalid response format");
+      }
+      throw aiError;
+    }
+
+    if (!suggestions || suggestions.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message:
+          "No suitable bundle opportunities found based on current trends.",
+        data: [],
+      });
+    }
+
+    const enrichedSuggestions = suggestions
+      .map((suggestion) => {
+        try {
+          const products =
+            suggestion.product_uids
+              ?.map((uid) => {
+                const product = validProducts.find((p) => p.uid === uid);
+                if (!product) {
+                  console.warn(`Product with UID ${uid} not found`);
+                }
+                return product;
+              })
+              .filter(Boolean) || [];
+
+          return {
+            bundleName: suggestion.bundleName || "Unnamed Bundle",
+            rationale: suggestion.rationale || "No rationale provided",
+            estimated_appeal: suggestion.estimated_appeal || "medium",
+            target_demographic:
+              suggestion.target_demographic || "General consumers",
+            products,
+            product_count: products.length,
+            created_at: new Date().toISOString(),
+          };
+        } catch (error) {
+          console.warn("Error enriching suggestion:", error);
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    const validBundles = enrichedSuggestions.filter(
+      (bundle) =>
+        bundle.products &&
+        bundle.products.length >= 2 &&
+        bundle.bundleName &&
+        bundle.rationale
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully generated ${validBundles.length} bundle opportunities.`,
+      data: validBundles,
+      metadata: {
+        total_products_analyzed: validProducts.length,
+        categories_found: productCategories.length,
+        search_region: search_region,
+        trends_source: "serper_ai",
+      },
+    });
+  } catch (error) {
+    console.error("Error generating bundle opportunities:", error);
+    if (error.message.includes("API key")) {
+      return res.status(500).json({
+        success: false,
+        message: "AI service configuration error.",
+      });
+    } else if (error.message.includes("products")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to generate bundle opportunities. Please try again.",
+      });
+    }
+  }
+}
 
 module.exports = {
   getProducts,
   getBundles,
   getApplicationIds,
   generateBundles,
-  saveOrderToDb,
   createBundles,
   generateName,
   generateImage,
   updateBundle,
   getCompanyInfo,
   generatePromptSuggestions,
-  // getAnalytics,
+  getAnalytics,
+  generateBundleOpportunities,
 };

@@ -94,7 +94,7 @@ const BundlesPage = () => {
 
   const handlePageChange = (page) => {
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleSearch = (searchValue) => {
@@ -133,7 +133,10 @@ const BundlesPage = () => {
   );
 
   const PaginationControls = () => {
-    const totalPages = bundlePagination.totalPages || 1;
+    const totalPages = bundlePagination.totalItems
+      ? Math.ceil(bundlePagination.totalItems / bundlesPerPage)
+      : 1;
+
     const currentPageNum = bundlePagination.currentPage || currentPage;
     const totalItems = bundlePagination.totalItems || 0;
 

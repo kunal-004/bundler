@@ -50,16 +50,18 @@ export const Home = () => {
   }, [filters.name]);
 
   useEffect(() => {
+    setFilters((prevFilters) => ({ ...prevFilters, category: "" }));
+  }, [applicationId]);
+
+  useEffect(() => {
     fetchProductsWithContext(
       1,
       productPagination.pageSize,
       false,
-      debouncedName,
-      filters.category
+      debouncedName
     );
   }, [
     debouncedName,
-    filters.category,
     applicationId,
     productPagination.pageSize,
     fetchProductsWithContext,
@@ -91,9 +93,18 @@ export const Home = () => {
   const sortedProducts = useMemo(() => {
     if (!productsToDisplay?.items) return [];
 
-    let sorted = [...productsToDisplay.items];
+    let filteredProducts = [...productsToDisplay.items];
+
+    if (filters.category) {
+      filteredProducts = filteredProducts.filter(
+        (product) =>
+          product.category_name === filters.category ||
+          product.category_slug === filters.category
+      );
+    }
+
     if (sortConfig.key) {
-      sorted.sort((a, b) => {
+      filteredProducts.sort((a, b) => {
         let aValue =
           sortConfig.key === "price" ? getProductPrice(a) : a[sortConfig.key];
         let bValue =
@@ -108,8 +119,8 @@ export const Home = () => {
           : bValue - aValue;
       });
     }
-    return sorted;
-  }, [productsToDisplay, sortConfig]);
+    return filteredProducts;
+  }, [productsToDisplay, sortConfig, filters.category]);
 
   const handleFilterChange = (filterName, value) =>
     setFilters((prev) => ({ ...prev, [filterName]: value }));
@@ -137,13 +148,7 @@ export const Home = () => {
   const handlePageChange = (page) => {
     const { currentPage, totalPages, pageSize } = productPagination;
     if (page >= 1 && page <= totalPages && page !== currentPage) {
-      fetchProductsWithContext(
-        page,
-        pageSize,
-        false,
-        filters.name,
-        filters.category
-      );
+      fetchProductsWithContext(page, pageSize, false, filters.name);
       document
         .getElementById("products-section")
         ?.scrollIntoView({ behavior: "smooth" });
